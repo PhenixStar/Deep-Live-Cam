@@ -97,6 +97,13 @@ impl FaceDetector {
         //   scores: outputs[idx]           (idx = 0..FMC)
         //   bboxes: outputs[idx + FMC]     (idx = 0..FMC)
         //   kps:    outputs[idx + FMC * 2] (idx = 0..FMC)
+        let fmc = STRIDES.len();
+        anyhow::ensure!(
+            outputs.len() >= fmc * 3,
+            "SCRFD: expected {} outputs, got {}",
+            fmc * 3,
+            outputs.len()
+        );
         for (level_idx, &(stride, num_props)) in STRIDES.iter().enumerate() {
             // try_extract_tensor returns (&Shape, &[T])
             let (_, scores_data) = outputs[level_idx]

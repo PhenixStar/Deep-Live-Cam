@@ -248,10 +248,13 @@ pub(crate) fn affine_matrix_swap(landmarks: &[[f32; 2]; 5]) -> [f32; 6] {
     similarity_transform(landmarks, &SWAP_DST)
 }
 
-/// Invert a 2x3 affine matrix in-place.
-pub(crate) fn invert_affine(mat: &[f32; 6]) -> [f32; 6] {
+/// Invert a 2x3 similarity affine matrix `[a, -b, tx, b, a, ty]`.
+///
+/// Returns `Err` if the matrix is singular (degenerate landmarks).
+pub(crate) fn invert_affine(mat: &[f32; 6]) -> anyhow::Result<[f32; 6]> {
     let (a, mb, tx, b, aa, ty) = (mat[0], mat[1], mat[2], mat[3], mat[4], mat[5]);
     let det = a * aa - mb * b;
+    anyhow::ensure!(det.abs() > 1e-10, "singular affine matrix (det={det})");
     let inv_det = 1.0 / det;
     let ia =  aa * inv_det;
     let ib = -mb * inv_det;
@@ -259,5 +262,5 @@ pub(crate) fn invert_affine(mat: &[f32; 6]) -> [f32; 6] {
     let id =  a  * inv_det;
     let itx = -(ia * tx + ib * ty);
     let ity = -(ic * tx + id * ty);
-    [ia, ib, itx, ic, id, ity]
+    Ok([ia, ib, itx, ic, id, ity])
 }

@@ -136,7 +136,8 @@ impl FaceSwapper {
 
         // 7. Inverse-warp patch back into frame using the forward affine matrix.
         let fwd_mat = affine_matrix_swap(&target_face.landmarks);
-        paste_back(frame, &swapped_bgr, &fwd_mat);
+        paste_back(frame, &swapped_bgr, &fwd_mat)
+            .context("swap: paste_back failed")?;
 
         Ok(())
     }
@@ -197,9 +198,9 @@ fn rgb_nchw_01_to_bgr_hwc(data: &[f32], h: usize, w: usize) -> Frame {
     let mut out = ndarray::Array3::<u8>::zeros((h, w, 3));
     for y in 0..h {
         for x in 0..w {
-            let r = (data[0 * hw + y * w + x].clamp(0.0, 1.0) * 255.0) as u8;
-            let g = (data[1 * hw + y * w + x].clamp(0.0, 1.0) * 255.0) as u8;
-            let b = (data[2 * hw + y * w + x].clamp(0.0, 1.0) * 255.0) as u8;
+            let r = (data[0 * hw + y * w + x].clamp(0.0, 1.0) * 255.0).round() as u8;
+            let g = (data[1 * hw + y * w + x].clamp(0.0, 1.0) * 255.0).round() as u8;
+            let b = (data[2 * hw + y * w + x].clamp(0.0, 1.0) * 255.0).round() as u8;
             out[[y, x, 0]] = b; // store as BGR
             out[[y, x, 1]] = g;
             out[[y, x, 2]] = r;
@@ -215,16 +216,30 @@ fn rgb_nchw_01_to_bgr_hwc(data: &[f32], h: usize, w: usize) -> Frame {
 /// For each pixel in `frame`, compute where it maps in the 128x128 `swapped`
 /// patch (via the inverse of `fwd_mat`).  Copy bilinear-interpolated patch
 /// colour into the frame wherever the mapping falls inside the patch.
-fn paste_back(frame: &mut Frame, swapped: &Frame, fwd_mat: &[f32; 6]) {
+fn paste_back(frame: &mut Frame, swapped: &Frame, fwd_mat: &[f32; 6]) -> Result<()> {
     let (fh, fw) = (frame.shape()[0], frame.shape()[1]);
     let (ph, pw) = (128usize, 128usize);
 
-    // Build inverse (frame coords → patch coords).
-    let inv = invert_affine(fwd_mat);
+    let inv = invert_affine(fwd_mat)?;
     let (ia, ib, itx, ic, id, ity) = (inv[0], inv[1], inv[2], inv[3], inv[4], inv[5]);
 
-    for fy in 0..fh {
-        for fx in 0..fw {
+    // Compute ROI: transform 128x128 patch corners to frame coords via fwd_mat
+    let corners = [(0.0f32, 0.0f32), (pw as f32, 0.0), (0.0, ph as f32), (pw as f32, ph as f32)];
+    let (mut min_x, mut min_y) = (fw as f32, fh as f32);
+    let (mut max_x, mut max_y) = (0.0f32, 0.0f32);
+    for (cx, cy) in &corners {
+        let fx = fwd_mat[0] * cx + fwd_mat[1] * cy + fwd_mat[2];
+        let fy = fwd_mat[3] * cx + fwd_mat[4] * cy + fwd_mat[5];
+        min_x = min_x.min(fx); min_y = min_y.min(fy);
+        max_x = max_x.max(fx); max_y = max_y.max(fy);
+    }
+    let y_start = (min_y.floor() as usize).max(0).min(fh);
+    let y_end   = (max_y.ceil() as usize + 1).min(fh);
+    let x_start = (min_x.floor() as usize).max(0).min(fw);
+    let x_end   = (max_x.ceil() as usize + 1).min(fw);
+
+    for fy in y_start..y_end {
+        for fx in x_start..x_end {
             let fx_f = fx as f32;
             let fy_f = fy as f32;
 
@@ -255,6 +270,7 @@ fn paste_back(frame: &mut Frame, swapped: &Frame, fwd_mat: &[f32; 6]) {
             }
         }
     }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
