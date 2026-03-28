@@ -80,7 +80,7 @@ mod opencv_backend {
     use super::*;
     use opencv::{
         core::{Mat, MatTraitConst, CV_8UC3},
-        prelude::VideoCaptureTrait,
+        prelude::{VideoCaptureTrait, VideoCaptureTraitConst},
         videoio::{
             VideoCapture, CAP_ANY, CAP_PROP_FRAME_HEIGHT, CAP_PROP_FRAME_WIDTH,
         },
@@ -94,7 +94,7 @@ mod opencv_backend {
         pub fn open(index: u32) -> Result<Self> {
             let mut cap = VideoCapture::new(index as i32, CAP_ANY)?;
             anyhow::ensure!(
-                opencv::videoio::VideoCapture::is_opened(&cap)?,
+                cap.is_opened()?,
                 "camera index {} could not be opened",
                 index
             );
@@ -143,14 +143,15 @@ mod opencv_backend {
 
     pub fn list_cameras_opencv() -> Result<Vec<CameraInfo>> {
         let mut cameras = Vec::new();
-        for i in 0..10u32 {
-            if let Ok(mut cap) = VideoCapture::new(i as i32, CAP_ANY) {
-                if opencv::videoio::VideoCapture::is_opened(&cap).unwrap_or(false) {
+        // Probe only 0-3 to avoid long hangs on Windows (each failed index
+        // can block for several seconds with DirectShow/MSMF backends).
+        for i in 0..4u32 {
+            if let Ok(cap) = VideoCapture::new(i as i32, CAP_ANY) {
+                if cap.is_opened().unwrap_or(false) {
                     cameras.push(CameraInfo {
                         index: i,
                         name: format!("Camera {}", i),
                     });
-                    let _ = VideoCaptureTrait::release(&mut cap);
                 }
             }
         }

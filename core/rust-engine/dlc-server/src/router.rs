@@ -398,7 +398,10 @@ async fn swap_image(
 async fn list_cameras(
     _state: State<Arc<RwLock<AppState>>>,
 ) -> impl IntoResponse {
-    let cameras = dlc_capture::list_cameras().unwrap_or_default();
+    // Camera probing can block for seconds per index on Windows; run off the async runtime.
+    let cameras = tokio::task::spawn_blocking(|| {
+        dlc_capture::list_cameras().unwrap_or_default()
+    }).await.unwrap_or_default();
     Json(serde_json::json!({"cameras": cameras}))
 }
 
