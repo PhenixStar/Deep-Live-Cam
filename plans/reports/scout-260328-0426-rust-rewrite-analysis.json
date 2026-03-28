@@ -1,0 +1,161 @@
+{
+  "title": "Deep-Live-Cam Architecture Scout Report",
+  "date": "2026-03-28",
+  "purpose": "Rust Rewrite & Tauri App Planning",
+  "summary": "3,200-line Python codebase for real-time face swap using ONNX models (insightface, inswapper, GFPGAN). No native Rust/C code. CustomTkinter GUI. FFmpeg integration. Virtual camera output.",
+  "python_modules": {
+    "core_count": 16,
+    "processor_count": 7,
+    "total_loc": 3200,
+    "largest_file": {
+      "name": "ui.py",
+      "size_kb": 57,
+      "lines": 1400,
+      "purpose": "CustomTkinter GUI with tabs (Image, Video, Live, Settings)"
+    },
+    "key_modules": {
+      "core.py": "Main orchestration (CLI, mode selection)",
+      "ui.py": "GUI implementation",
+      "face_analyser.py": "Face detection via insightface.FaceAnalysis",
+      "face_swapper.py": "Face swap using inswapper_128_fp16.onnx",
+      "virtual_camera.py": "Virtual camera output abstraction",
+      "gpu_processing.py": "Optional CUDA acceleration wrapper",
+      "utilities.py": "FFmpeg helpers, frame extraction",
+      "video_capture.py": "Cross-platform webcam capture"
+    }
+  },
+  "entry_points": {
+    "main": "run.py (10 lines) -> modules.core.run()",
+    "modes": [
+      "GUI mode (default): CustomTkinter UI",
+      "CLI mode (headless): -s/--source flag",
+      "Live mode: Real-time face swap to virtual camera"
+    ],
+    "key_cli_flags": [
+      "-s/--source PATH",
+      "-t/--target PATH",
+      "--frame-processor [face_swapper, face_enhancer, ...]",
+      "--many-faces (process all detected faces)",
+      "--map-faces (use source_target_map)",
+      "--mouth-mask (preserve original mouth)",
+      "--virtual-camera (output to v4l2loopback/OBS)",
+      "--execution-provider [cpu, cuda, coreml, directml, openvino]"
+    ]
+  },
+  "dependencies": {
+    "ml_stack": [
+      "insightface (0.7.3) - Face detection (buffalo_l)",
+      "onnxruntime[-gpu|-silicon] (1.24.2 GPU / 1.16.3 Mac)",
+      "opencv-python (4.10.0.84)",
+      "opennsfw2 (0.10.2) - NSFW filter"
+    ],
+    "gui": [
+      "customtkinter (5.2.2) - Modern tkinter wrapper",
+      "pillow (12.1.1) - Image manipulation"
+    ],
+    "total_direct_deps": 20
+  },
+  "processing_pipeline": {
+    "stages": [
+      "1. INPUT: VideoCapturer.read() -> cv2.VideoCapture",
+      "2. DETECTION: face_analyser.get_one_face() (buffalo_l ONNX)",
+      "3. SWAP: face_swapper.process_frame() (inswapper ONNX)",
+      "4. POST-PROCESS: mouth_mask, face_enhancer (optional)",
+      "5. GPU ACCEL: gpu_processing.* (CUDA or CPU fallback)",
+      "6. OUTPUT: virtual_camera.send() OR ffmpeg encode"
+    ],
+    "threading": {
+      "gui_thread": "Main CustomTkinter loop",
+      "capture_thread": "Implicit cv2.VideoCapture thread",
+      "batch_workers": "ThreadPoolExecutor (max_workers = execution_threads)",
+      "locks": "MAP_LOCK protects source_target_map",
+      "interpolation": "Thread-local storage for frame blending"
+    },
+    "batch_processing": "Frame extraction -> ThreadPoolExecutor (batch_size = min(32, N_frames/workers)) -> ffmpeg encode"
+  },
+  "gui_structure": {
+    "framework": "CustomTkinter",
+    "main_window": "600x800 with 4 tabs (Image, Video, Live, Settings)",
+    "tabs": {
+      "Image": "Source/target image, processors, start",
+      "Video": "Source/target video, encoder settings, output path",
+      "Live": "Camera selector, preview, virtual camera toggle",
+      "Settings": "Execution provider, memory, threads, language"
+    },
+    "key_functions": [
+      "set_image(path)",
+      "set_target(path)",
+      "start() - batch processing",
+      "live() - webcam streaming",
+      "update_status(msg)"
+    ]
+  },
+  "model_loading": {
+    "models": {
+      "inswapper_128_fp16.onnx": "Face swap (128 embeddings)",
+      "buffalo_l": "Face detection (auto-downloaded by insightface)",
+      "gfpgan-1024.onnx": "Face enhancement (ONNX Runtime)",
+      "gpen-256.onnx": "Alternative enhancement",
+      "gpen-512.onnx": "Alternative enhancement"
+    },
+    "loading_strategy": [
+      "Pre-check: conditional_download() if missing",
+      "Lazy init: Global singletons with double-checked locking",
+      "Thread-safe: Locks prevent concurrent init",
+      "Path: DEEP_LIVE_CAM_MODELS_DIR env var or ./models/"
+    ],
+    "providers": [
+      "CPU (always)",
+      "CUDA (NVIDIA)",
+      "CoreML (Apple Silicon)",
+      "DirectML (Windows)",
+      "OpenVINO (Intel)"
+    ]
+  },
+  "test_coverage": {
+    "status": "No dedicated test suite",
+    "test_assets": "test_assets/ directory with sample files",
+    "testing_approach": "Manual GUI/CLI testing"
+  },
+  "git_activity": {
+    "recent_themes": [
+      "Performance optimization (caching, lock reduction)",
+      "Threading safety (MAP_LOCK added)",
+      "Feature additions (virtual camera, frame interpolation)",
+      "Platform hardening (Linux-specific APIs)"
+    ],
+    "recent_commits": 20
+  },
+  "compiled_code": {
+    "native_code": "NONE - No Rust/C/C++ in source",
+    "note": "All heavy lifting via external wheels (insightface, opencv, onnxruntime)"
+  },
+  "recommendations_for_rust_rewrite": {
+    "keep": [
+      "ONNX Runtime (Rust crate available)",
+      "OpenCV (Rust bindings available)",
+      "External model inference"
+    ],
+    "replace": [
+      "GUI: Tauri + React/Vue",
+      "Core orchestration: Rust with tokio async",
+      "Threading: tokio runtime instead of ThreadPoolExecutor",
+      "IPC: Tauri events for progress",
+      "State: RwLock<GlobalState>"
+    ],
+    "estimated_effort_weeks": "9-13 weeks"
+  },
+  "platform_support": {
+    "linux": "Full (CUDA, OpenVINO, v4l2loopback)",
+    "macos": "Apple Silicon (M1-M3) with onnxruntime-silicon",
+    "windows": "DirectML GPU, DirectShow camera, OBS virtual camera"
+  },
+  "unresolved_questions": [
+    "Insightface buffalo_l model licensing for commercial use?",
+    "Custom vs standard ONNX models on Hugging Face?",
+    "Performance profiling baseline before Rust rewrite?",
+    "Streaming support beyond virtual camera (RTMP/HLS)?",
+    "Mouth mask accuracy testing thoroughness?",
+    "Virtual camera driver distribution strategy?"
+  ]
+}

@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+
+# Tauri build artifacts
+app/src-tauri/target/
+app/src-tauri/sidecar/
+app/src-tauri/binaries/deep-live-cam-server-*
+
+# Models (downloaded at runtime)
+core/models/*.onnx
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Claude dev artifacts
+.claude/

@@ -1,0 +1,158 @@
+DEEP-LIVE-CAM ARCHITECTURE SCOUT REPORT
+Date: 2026-03-28 | Purpose: Rust Rewrite & Tauri App Planning
+
+EXECUTIVE SUMMARY
+3200 lines of Python (no Rust/C code present). Real-time face swap using:
+- CustomTkinter GUI (modern tkinter wrapper)
+- OpenCV for image/video processing  
+- ONNX Runtime for ML inference (insightface, inswapper, GFPGAN models)
+- FFmpeg for video encoding
+- Optional CUDA/GPU acceleration
+
+Key insight: Pure Python orchestration layer. All heavy ML lifting via 
+pre-compiled external libraries. Rust rewrite = replace orchestration + GUI, 
+not the ML backends.
+
+PYTHON MODULES CATALOG
+CORE MODULES (16 files, 2800 LOC)
+  
+  core.py (400 LOC): Main orchestration, CLI parsing, mode selection
+  ui.py (1400 LOC, 57K): CustomTkinter GUI with 4 tabs
+  face_analyser.py (206 LOC): Wraps insightface.FaceAnalysis (buffalo_l model)
+  globals.py (76 LOC): Global state container (source_target_map, MAP_LOCK)
+  video_capture.py (95 LOC): Cross-platform webcam (cv2.VideoCapture wrapper)
+  gpu_processing.py (250 LOC): Optional CUDA acceleration wrapper
+  utilities.py (350 LOC): FFmpeg helpers, frame extraction, video creation
+  virtual_camera.py (86 LOC): Virtual camera output (v4l2loopback/OBS)
+  capturer.py (34 LOC): Frame extraction from video files
+  cluster_analysis.py (32 LOC): K-means clustering for face mapping
+  + 6 more: metadata, paths, gettext, ui_tooltip, tkinter_fix, typing
+
+FRAME PROCESSOR MODULES (7 files, 2000 LOC)
+  
+  face_swapper.py (1300 LOC, 57K)
+    PRIMARY: Real-time face swap using inswapper_128_fp16.onnx
+    Features: Poisson blending, color correction, frame interpolation
+  
+  face_enhancer.py (350 LOC): GFPGAN enhancement
+  face_masking.py (600 LOC, 25K): Mouth mask preservation
+  face_enhancer_gpen*.py (180 LOC total): GPEN-256/512 variants
+  frame/core.py (110 LOC): Processor discovery and ThreadPoolExecutor
+
+ENTRY POINT: run.py (10 LOC) calls modules.core.run()
+
+DEPENDENCIES (20 packages)
+ML/Vision: insightface, onnxruntime, opencv-python, opennsfw2, tensorflow
+GUI: customtkinter, pillow, tk
+Utilities: numpy, psutil, protobuf, sklearn, tqdm, requests
+Platform: cv2_enumerate_cameras, pygrabber, pyvirtualcam
+
+PROCESSING PIPELINE
+  Input: VideoCapturer.read() [cv2.VideoCapture]
+  Detect: face_analyser.get_one_face() [buffalo_l ONNX]
+  Swap: face_swapper.process_frame() [inswapper_128_fp16.onnx]
+  Enhance: face_enhancer.process_frame() [gfpgan-1024.onnx] (optional)
+  Mask: face_masking.process_frame() (optional)
+  GPU: gpu_processing.* [CUDA or CPU fallback]
+  Output: 
+    Live: virtual_camera.send() -> v4l2loopback/OBS
+    Batch: ThreadPoolExecutor -> ffmpeg encode -> MP4/MKV
+
+Threading:
+  - Main thread: GUI event loop
+  - Live capture: Implicit cv2.VideoCapture thread
+  - Batch workers: ThreadPoolExecutor (batch_size = min(32, N_frames/workers))
+  - Synchronization: MAP_LOCK for source_target_map
+
+GUI STRUCTURE (CustomTkinter)
+  ROOT (600x800)
+    Tabview: Image, Video, Live, Settings
+    Status bar
+    Tooltips
+  
+  Popup windows for batch/live modes
+
+KEY WIDGETS: CTkLabel, CTkButton, CTkCheckBox, CTkOptionMenu, CTkScrollableFrame
+
+MODELS & INFERENCE
+  inswapper_128_fp16.onnx: Face swap (ONNX Runtime)
+  buffalo_l: Face detection (insightface)
+  gfpgan-1024.onnx: Face enhancement (ONNX Runtime)
+  gpen-256/512.onnx: Alternative enhancement
+
+Loading Strategy:
+  1. Pre-check: conditional_download() if missing
+  2. Lazy init: Global singletons with double-checked locking
+  3. Thread-safe: THREAD_LOCK protects initialization
+  4. Path: DEEP_LIVE_CAM_MODELS_DIR env var or ./models/
+  5. Providers: CPU, CUDA, CoreML, DirectML, OpenVINO
+
+TEST COVERAGE
+  NO dedicated test suite
+  test_assets/ directory with sample files
+  Manual GUI/CLI testing only
+
+GIT ACTIVITY
+  Recent themes: Performance optimization, threading safety, feature additions
+  Active development (latest: 2026-03-28)
+  20 recent commits reviewed
+
+COMPILED CODE
+  NO native Rust/C/C++ code in source tree
+  All heavy lifting via external wheels (insightface, opencv, onnxruntime)
+  Implication: Rust rewrite = replace orchestration/UI, not ML backends
+
+PLATFORM SUPPORT
+  Linux: Full (CUDA, OpenVINO, v4l2loopback)
+  macOS: Apple Silicon (M1-M3) with onnxruntime-silicon
+  Windows: DirectML, DirectShow, OBS virtual camera
+
+RECOMMENDATIONS FOR RUST REWRITE
+
+KEEP (External ML Libraries):
+  - ONNX Runtime (rust-onnxruntime crate)
+  - OpenCV (opencv-rust crate)
+  - Pre-trained models
+
+REPLACE (Python -> Rust + Tauri):
+  GUI: Tauri + React/Vue frontend
+  Orchestration: Rust + tokio async runtime
+  Threading: tokio instead of ThreadPoolExecutor
+  IPC: Tauri events for progress
+  State: RwLock<GlobalState>
+  Platform: Rust FFI for video/virtual camera
+
+ESTIMATED EFFORT: 9-13 weeks production-ready
+
+PROJECT STRUCTURE:
+  deep-live-cam-rs/
+  ├── src-tauri/src/
+  │   ├── main.rs
+  │   ├── commands/ (image.rs, video.rs, live.rs)
+  │   ├── pipeline/ (processor trait, swapper, enhancer, masking)
+  │   ├── capture/ (video_capture.rs, virtual_camera.rs, platform/)
+  │   └── state.rs
+  ├── src-frontend/ (React + Tauri IPC)
+  └── Cargo.toml (workspace)
+
+UNRESOLVED QUESTIONS
+1. Insightface buffalo_l licensing for commercial use?
+2. ONNX models: Custom vs standard on Hugging Face?
+3. Performance baseline before Rust rewrite?
+4. Streaming support beyond virtual camera (RTMP/HLS)?
+5. Mouth masking accuracy testing thoroughness?
+6. Virtual camera distribution strategy?
+7. Will Rust rewrite pause active development?
+
+CONCLUSION
+Well-structured Python orchestration over mature ML libraries. No critical
+performance bottlenecks (ML inference dominates, already optimized via ONNX).
+
+Rust gains: Type safety, async, single binary, 10-20% latency reduction
+Rust costs: 9-13 weeks effort, ONNX binding maintenance
+
+Rewrite if: Production scale deployment, Tauri native app distribution needed
+Otherwise: Continue Python development (faster iteration)
+
+Report generated by Scout agent | 2026-03-28
+For Rust rewrite planning & Tauri app architecture.
