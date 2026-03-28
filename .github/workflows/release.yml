@@ -1,0 +1,100 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            sidecar-script: scripts/build-sidecar.sh
+          - os: macos-14
+            sidecar-script: scripts/build-sidecar-macos.sh
+          - os: windows-latest
+            sidecar-script: scripts/build-sidecar-win.ps1
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      # Linux system deps
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libssl-dev zstd
+
+      # macOS: zstd for python-build-standalone extraction
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: brew install zstd
+
+      # Cache python-build-standalone download
+      - name: Cache PBS download
+        uses: actions/cache@v4
+        with:
+          path: /tmp/pbs-cache
+          key: pbs-${{ runner.os }}-${{ runner.arch }}
+
+      # Build the Python sidecar
+      - name: Build sidecar (Unix)
+        if: runner.os != 'Windows'
+        run: bash ${{ matrix.sidecar-script }}
+
+      - name: Build sidecar (Windows)
+        if: runner.os == 'Windows'
+        run: pwsh ${{ matrix.sidecar-script }}
+
+      # Build Windows Rust launcher
+      - name: Build Windows sidecar launcher
+        if: runner.os == 'Windows'
+        run: |
+          cargo build --release --manifest-path app/src-tauri/sidecar-launcher/Cargo.toml
+          Copy-Item "app/src-tauri/sidecar-launcher/target/release/deep-live-cam-server.exe" "app/src-tauri/binaries/deep-live-cam-server-x86_64-pc-windows-msvc.exe"
+
+      # Install frontend deps and build Tauri app
+      - name: Install frontend dependencies
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: app
+          tagName: ${{ github.ref_name }}
+          releaseName: "Deep Live Cam ${{ github.ref_name }}"
+          releaseBody: "See the assets below to download and install."
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true
+          args: --bundles deb,appimage,msi,nsis,dmg

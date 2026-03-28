@@ -48,6 +48,12 @@
           "sidecar": true
         }
       ]
+    },
+    "updater": {
+      "endpoints": [
+        "https://github.com/PhenixStar/Deep-Live-Cam/releases/latest/download/latest.json"
+      ],
+      "pubkey": "UPDATER_PUBKEY_PLACEHOLDER"
     }
   }
 }

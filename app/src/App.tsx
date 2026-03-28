@@ -156,6 +156,27 @@ export default function App() {
     };
   }, []);
 
+  // Check for app updates after a short delay (don't block startup)
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      try {
+        const { check } = await import("@tauri-apps/plugin-updater");
+        const update = await check();
+        if (update) {
+          const confirmed = window.confirm(
+            `Update ${update.version} available. Download now?`,
+          );
+          if (confirmed) {
+            await update.downloadAndInstall();
+          }
+        }
+      } catch {
+        // Update check is non-critical; silently ignore failures
+      }
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, []);
+
   const statusColor = {
     disconnected: "#666",
     connecting: "#f59e0b",
