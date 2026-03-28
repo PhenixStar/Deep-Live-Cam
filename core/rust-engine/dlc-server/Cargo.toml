@@ -4,6 +4,16 @@ description = "HTTP/WebSocket server replacing Python FastAPI sidecar"
 version.workspace = true
 edition.workspace = true
 
+# Expose a library target so integration tests can import `build_router`
+# and `test_state` without binding a real TCP socket.
+[lib]
+name = "dlc_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "dlc-server"
+path = "src/main.rs"
+
 [dependencies]
 dlc-core = { path = "../dlc-core" }
 dlc-capture = { path = "../dlc-capture" }
