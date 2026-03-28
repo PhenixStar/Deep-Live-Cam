@@ -450,16 +450,19 @@ async fn ws_video(
     ws.on_upgrade(move |socket| handle_video_ws(socket, state))
 }
 
-fn generate_test_frame() -> Vec<u8> {
-    const W: usize = 640;
-    const H: usize = 480;
-    let mut pixels = vec![0u8; W * H * 3];
-    for chunk in pixels.chunks_exact_mut(3) {
-        chunk[0] = 0;
-        chunk[1] = 0;
-        chunk[2] = 200;
-    }
-    pixels
+/// Pre-allocated test frame (640x480 solid blue). Avoids 900KB allocation per tick.
+fn generate_test_frame() -> &'static [u8] {
+    use std::sync::OnceLock;
+    static FRAME: OnceLock<Vec<u8>> = OnceLock::new();
+    FRAME.get_or_init(|| {
+        const W: usize = 640;
+        const H: usize = 480;
+        let mut pixels = vec![0u8; W * H * 3];
+        for chunk in pixels.chunks_exact_mut(3) {
+            chunk[2] = 200; // blue channel
+        }
+        pixels
+    })
 }
 
 fn encode_jpeg(width: u32, height: u32, rgb_pixels: &[u8]) -> anyhow::Result<Vec<u8>> {

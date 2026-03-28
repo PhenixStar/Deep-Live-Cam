@@ -38,9 +38,9 @@ pub fn preprocess_detection(frame: &crate::Frame) -> Result<(Vec<i64>, Vec<f32>)
     // Nearest-neighbour resize into top-left of the canvas.
     // Frame is BGR; model expects RGB, so swap B and R channels.
     for dy in 0..new_h {
-        let sy = ((dy as f32 / scale) as usize).min(src_h - 1);
+        let sy = (((dy as f32 + 0.5) / scale) as usize).min(src_h - 1);
         for dx in 0..new_w {
-            let sx = ((dx as f32 / scale) as usize).min(src_w - 1);
+            let sx = (((dx as f32 + 0.5) / scale) as usize).min(src_w - 1);
             let dst = (dy * DET_SIZE + dx) * 3;
             hwc[dst]     = (frame[[sy, sx, 2]] as f32 - 127.5) / 128.0; // R
             hwc[dst + 1] = (frame[[sy, sx, 1]] as f32 - 127.5) / 128.0; // G

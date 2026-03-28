@@ -121,7 +121,7 @@ impl FaceDetector {
 
             for anchor_idx in 0..num_props {
                 let score = scores_data[anchor_idx];
-                if score < threshold {
+                if score.is_nan() || score < threshold {
                     continue;
                 }
 
