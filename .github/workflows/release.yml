@@ -19,16 +19,26 @@ jobs:
         include:
           - os: ubuntu-22.04
             sidecar-script: scripts/build-sidecar.sh
+            bundles: deb,appimage
           - os: macos-14
             sidecar-script: scripts/build-sidecar-macos.sh
+            bundles: dmg
           - os: windows-latest
             sidecar-script: scripts/build-sidecar-win.ps1
+            bundles: msi,nsis
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify updater pubkey is set
+        run: |
+          if grep -q "UPDATER_PUBKEY_PLACEHOLDER" app/src-tauri/tauri.conf.json; then
+            echo "::error::Updater pubkey placeholder not replaced. Generate keys first."
+            exit 1
+          fi
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -97,4 +107,4 @@ jobs:
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: true
-          args: --bundles deb,appimage,msi,nsis,dmg
+          args: --bundles ${{ matrix.bundles }}
