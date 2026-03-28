@@ -20,18 +20,22 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![get_backend_url])
         .setup(|app| {
-            // Spawn the Python sidecar when the app starts
+            // Resolve models directory relative to the sidecar binary
+            let resource_dir = app.path().resource_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let models_dir = resource_dir.join("models");
+
             let sidecar = app.shell()
                 .sidecar("binaries/deep-live-cam-server")
-                .expect("failed to create sidecar command");
+                .expect("failed to create sidecar command")
+                .args(["--models-dir", &models_dir.to_string_lossy()]);
 
             let (_rx, child) = sidecar.spawn()
                 .expect("failed to spawn sidecar");
 
-            // Store handle so sidecar is killed on app exit
             app.manage(SidecarChild(Mutex::new(Some(child))));
 
-            println!("[TAURI] Python backend sidecar started");
+            println!("[TAURI] Backend sidecar started (models: {})", models_dir.display());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -40,7 +44,7 @@ fn main() {
                     if let Ok(mut guard) = state.0.lock() {
                         if let Some(child) = guard.take() {
                             let _ = child.kill();
-                            println!("[TAURI] Python backend sidecar stopped");
+                            println!("[TAURI] Backend sidecar stopped");
                         }
                     }
                 }
