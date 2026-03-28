@@ -9,7 +9,7 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tower_http::cors::{CorsLayer, Any};
@@ -155,8 +155,23 @@ async fn list_cameras(
     Json(serde_json::json!({"cameras": cameras}))
 }
 
-async fn set_camera(Path(index): Path<u32>) -> impl IntoResponse {
-    Json(serde_json::json!({"status": "ok", "camera_index": index}))
+async fn set_camera(
+    State(state): State<Arc<RwLock<AppState>>>,
+    Path(index): Path<u32>,
+) -> impl IntoResponse {
+    // Validate against known cameras (mirrors Python behaviour).
+    let cameras = dlc_capture::list_cameras().unwrap_or_default();
+    if !cameras.iter().any(|c| c.index == index) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": format!("Camera {} not available", index)})),
+        )
+            .into_response();
+    }
+
+    let mut s = state.write().await;
+    s.active_camera = index;
+    Json(serde_json::json!({"status": "ok", "camera_index": index})).into_response()
 }
 
 async fn get_settings(
@@ -193,11 +208,110 @@ async fn update_settings(
     Json(serde_json::json!({"status": "ok"}))
 }
 
-async fn ws_video(ws: WebSocketUpgrade) -> impl IntoResponse {
-    ws.on_upgrade(handle_video_ws)
+async fn ws_video(
+    ws: WebSocketUpgrade,
+    State(state): State<Arc<RwLock<AppState>>>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_video_ws(socket, state))
 }
 
-async fn handle_video_ws(mut _socket: WebSocket) {
-    // TODO Week 7: camera capture + face processing + JPEG streaming
-    tracing::warn!("WebSocket video handler not yet implemented");
+/// Generate a solid-blue (R=0, G=0, B=200) RGB test frame, 640x480.
+/// Replaces real camera capture until nokhwa is wired in Week 7.
+fn generate_test_frame() -> Vec<u8> {
+    const W: usize = 640;
+    const H: usize = 480;
+    let mut pixels = vec![0u8; W * H * 3];
+    for chunk in pixels.chunks_exact_mut(3) {
+        chunk[0] = 0;   // R
+        chunk[1] = 0;   // G
+        chunk[2] = 200; // B
+    }
+    pixels
+}
+
+/// Encode raw RGB pixels (width x height x 3) as JPEG bytes at quality 80.
+fn encode_jpeg(width: u32, height: u32, rgb_pixels: &[u8]) -> anyhow::Result<Vec<u8>> {
+    use image::{ImageBuffer, Rgb, ImageEncoder};
+    use image::codecs::jpeg::JpegEncoder;
+
+    let img: ImageBuffer<Rgb<u8>, Vec<u8>> =
+        ImageBuffer::from_raw(width, height, rgb_pixels.to_vec())
+            .ok_or_else(|| anyhow::anyhow!("invalid pixel buffer dimensions"))?;
+
+    let mut buf: Vec<u8> = Vec::new();
+    let encoder = JpegEncoder::new_with_quality(&mut buf, 80);
+    encoder.write_image(
+        img.as_raw(),
+        width,
+        height,
+        image::ExtendedColorType::Rgb8,
+    )?;
+    Ok(buf)
+}
+
+/// WebSocket handler: streams JPEG frames at ~30 fps.
+///
+/// Frame source is a stub (solid-blue 640x480) until nokhwa is integrated in Week 7.
+/// Face processing hook is present but no-op until dlc-core pipeline lands in Week 6.
+/// Uses `tokio::select!` so incoming client messages (close frames, etc.) are handled
+/// concurrently with the send path — no separate task needed.
+async fn handle_video_ws(mut socket: WebSocket, state: Arc<RwLock<AppState>>) {
+    use axum::extract::ws::Message;
+    use tokio::time::{interval, Duration};
+
+    tracing::info!("[WS] video client connected");
+
+    // ~30 fps ticker (33 ms per frame).
+    let mut ticker = interval(Duration::from_millis(33));
+
+    loop {
+        tokio::select! {
+            // Frame tick: generate, (stub-)process, encode, send.
+            _ = ticker.tick() => {
+                // Stub capture: solid-blue test frame until Week 7 (nokhwa).
+                let rgb = generate_test_frame();
+
+                // Stub processing: check if a source face is set, pass frame through.
+                // Real face swap / enhancement wired in Week 6-7.
+                {
+                    let _s = state.read().await;
+                    // When _s.source_face is Some, invoke processors here.
+                    // No-op until dlc-core pipeline is wired.
+                }
+
+                let jpeg = match encode_jpeg(640, 480, &rgb) {
+                    Ok(j) => j,
+                    Err(e) => {
+                        tracing::error!("[WS] JPEG encode error: {e}");
+                        continue;
+                    }
+                };
+
+                if let Err(e) = socket.send(Message::Binary(jpeg.into())).await {
+                    tracing::info!("[WS] send failed (client disconnected): {e}");
+                    break;
+                }
+            }
+
+            // Incoming messages: axum handles ping/pong automatically;
+            // a Close frame or recv error signals client disconnect.
+            msg = socket.recv() => {
+                match msg {
+                    None | Some(Ok(Message::Close(_))) => {
+                        tracing::info!("[WS] client closed connection");
+                        break;
+                    }
+                    Some(Err(e)) => {
+                        tracing::warn!("[WS] receive error: {e}");
+                        break;
+                    }
+                    Some(Ok(_)) => {
+                        // Ignore ping/pong/text/binary from client — this is a read-only stream.
+                    }
+                }
+            }
+        }
+    }
+
+    tracing::info!("[WS] video handler exiting");
 }

@@ -327,9 +327,16 @@ mod tests {
         let mut frame = solid_frame(100, 100, 50);
         let enhanced = solid_frame(50, 50, 200);
         paste_back(&mut frame, &enhanced, 25, 25, 75, 75);
-        // Top-left corner of crop (25,25) is in the feather zone → should be < 200.
-        let corner = frame[[25, 25, 0]];
-        assert!(corner < 200, "border pixel should be blended, got {corner}");
-        assert!(corner > 50, "border pixel should have some enhancement, got {corner}");
+
+        // The very edge pixel (25,25) has alpha=0 (dy=0,dx=0 → fy*fx=0), so it
+        // stays at the original value. Check that it was NOT fully replaced.
+        let edge = frame[[25, 25, 0]];
+        assert_eq!(edge, 50, "edge pixel should remain original, got {edge}");
+
+        // A pixel one step inside the feather zone should be partially blended:
+        // it should be between the original (50) and enhanced (200) values.
+        let inside = frame[[26, 26, 0]];
+        assert!(inside > 50, "pixel inside border should have some enhancement, got {inside}");
+        assert!(inside < 200, "pixel inside border should be blended, got {inside}");
     }
 }

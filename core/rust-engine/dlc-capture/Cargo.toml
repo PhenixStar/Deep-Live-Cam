@@ -4,8 +4,17 @@ description = "Camera capture and virtual camera output"
 version.workspace = true
 edition.workspace = true
 
+[features]
+opencv = ["dep:opencv"]
+
 [dependencies]
 anyhow.workspace = true
 tracing.workspace = true
 image.workspace = true
 serde.workspace = true
+ndarray.workspace = true
+
+[dependencies.opencv]
+version = "0.93"
+features = ["videoio"]
+optional = true

@@ -17,7 +17,7 @@ case "$ARCH" in
   *)      echo "[ERROR] Unsupported arch: $ARCH"; exit 1 ;;
 esac
 
-URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_RELEASE}/cpython-${PYTHON_VERSION}+${PBS_RELEASE}-${TRIPLE}-install_only_stripped.tar.zst"
+URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_RELEASE}/cpython-${PYTHON_VERSION}+${PBS_RELEASE}-${TRIPLE}-install_only_stripped.tar.gz"
 
 echo "[BUILD] Target: macOS $TRIPLE"
 echo "[BUILD] Python: $PYTHON_VERSION (PBS $PBS_RELEASE)"
@@ -28,7 +28,7 @@ mkdir -p "$SIDECAR_DIR" "$BINARIES_DIR"
 
 # 1. Download and extract Python
 echo "[BUILD] Downloading python-build-standalone..."
-curl -fSL "$URL" | zstd -dc | tar xf - -C "$SIDECAR_DIR"
+curl -fSL "$URL" | tar -xzf - -C "$SIDECAR_DIR"
 
 # 2. Create virtual environment
 echo "[BUILD] Creating virtual environment..."

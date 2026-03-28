@@ -2,10 +2,16 @@
 //!
 //! Model: SCRFD-10GF (`buffalo_l/buffalo_l/det_10g.onnx`)
 //! - Input:  "input.1"  [1, 3, 640, 640] float32
-//! - Output: 9 tensors (3 FPN levels × {score, bbox, kps})
-//!   Stride 8  → score[1,12800,1], bbox[1,12800,4], kps[1,12800,10]
-//!   Stride 16 → score[1,3200,1],  bbox[1,3200,4],  kps[1,3200,10]
-//!   Stride 32 → score[1,800,1],   bbox[1,800,4],   kps[1,800,10]
+//! - Output: 9 tensors grouped by type (scores, bboxes, kps), NOT by stride:
+//!   index 0: score stride-8   [1,12800,1]
+//!   index 1: score stride-16  [1,3200,1]
+//!   index 2: score stride-32  [1,800,1]
+//!   index 3: bbox  stride-8   [1,12800,4]
+//!   index 4: bbox  stride-16  [1,3200,4]
+//!   index 5: bbox  stride-32  [1,800,4]
+//!   index 6: kps   stride-8   [1,12800,10]
+//!   index 7: kps   stride-16  [1,3200,10]
+//!   index 8: kps   stride-32  [1,800,10]
 
 use crate::{DetectedFace, Frame};
 use crate::preprocess::{preprocess_detection, letterbox_params};
@@ -18,6 +24,9 @@ const NMS_IOU_THRESHOLD: f32 = 0.4;
 
 /// Anchors per spatial cell (SCRFD-10GF uses 2).
 const NUM_ANCHORS: usize = 2;
+
+/// Number of FPN feature-map levels (used as offset stride in output indexing).
+const FMC: usize = 3;
 
 /// FPN stride levels: (stride, num_anchors_total).
 /// num_anchors_total = (640/stride)^2 * NUM_ANCHORS
@@ -84,24 +93,21 @@ impl FaceDetector {
         let mut candidates: Vec<DetectedFace> = Vec::new();
 
         // Output tensor layout (InsightFace buffalo_l SCRFD-10GF):
-        //   index 0: score stride-8   [1,12800,1]
-        //   index 1: bbox  stride-8   [1,12800,4]
-        //   index 2: kps   stride-8   [1,12800,10]
-        //   index 3..5: stride-16  (same pattern)
-        //   index 6..8: stride-32  (same pattern)
+        //   Grouped by type, NOT interleaved by stride.
+        //   scores: outputs[idx]           (idx = 0..FMC)
+        //   bboxes: outputs[idx + FMC]     (idx = 0..FMC)
+        //   kps:    outputs[idx + FMC * 2] (idx = 0..FMC)
         for (level_idx, &(stride, num_props)) in STRIDES.iter().enumerate() {
-            let base = level_idx * 3;
-
             // try_extract_tensor returns (&Shape, &[T])
-            let (_, scores_data) = outputs[base]
+            let (_, scores_data) = outputs[level_idx]
                 .try_extract_tensor::<f32>()
-                .with_context(|| format!("extract scores[{}]", base))?;
-            let (_, bboxes_data) = outputs[base + 1]
+                .with_context(|| format!("extract scores[{}]", level_idx))?;
+            let (_, bboxes_data) = outputs[level_idx + FMC]
                 .try_extract_tensor::<f32>()
-                .with_context(|| format!("extract bboxes[{}]", base + 1))?;
-            let (_, kps_data) = outputs[base + 2]
+                .with_context(|| format!("extract bboxes[{}]", level_idx + FMC))?;
+            let (_, kps_data) = outputs[level_idx + FMC * 2]
                 .try_extract_tensor::<f32>()
-                .with_context(|| format!("extract kps[{}]", base + 2))?;
+                .with_context(|| format!("extract kps[{}]", level_idx + FMC * 2))?;
 
             // Feature map side length for this stride.
             let feat_side = 640 / stride;
@@ -117,8 +123,8 @@ impl FaceDetector {
                 let cell = anchor_idx / NUM_ANCHORS;
                 let row  = cell / feat_side;
                 let col  = cell % feat_side;
-                let cx = (col as f32 + 0.5) * stride as f32;
-                let cy = (row as f32 + 0.5) * stride as f32;
+                let cx = col as f32 * stride as f32;
+                let cy = row as f32 * stride as f32;
 
                 // SCRFD bbox encoding: (dist_left, dist_top, dist_right, dist_bottom) × stride.
                 let b = anchor_idx * 4;

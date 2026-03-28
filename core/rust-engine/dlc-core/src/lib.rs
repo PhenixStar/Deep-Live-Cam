@@ -49,7 +49,7 @@ impl Default for PipelineConfig {
 }
 
 /// Load and validate all ONNX models. Returns error if any model fails to load.
-pub fn validate_models(models_dir: &std::path::Path, providers: &[String]) -> Result<()> {
+pub fn validate_models(models_dir: &std::path::Path, _providers: &[String]) -> Result<()> {
     tracing::info!("Validating ONNX models in {}", models_dir.display());
 
     let required = [
