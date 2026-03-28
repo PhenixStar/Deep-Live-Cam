@@ -17,7 +17,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-22.04
+          - os: ubuntu-24.04
             bundles: deb,appimage
             rust-sidecar: scripts/build-rust-sidecar.sh
           - os: macos-14
