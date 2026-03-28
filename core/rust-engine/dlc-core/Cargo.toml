@@ -10,3 +10,8 @@ ndarray.workspace = true
 image.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[[bin]]
+name = "validate-models"
+path = "src/bin/validate_models.rs"
