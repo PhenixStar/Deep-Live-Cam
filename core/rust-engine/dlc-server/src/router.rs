@@ -20,6 +20,40 @@ use crate::state::AppState;
 use dlc_core::{detect::FaceDetector, swap::FaceSwapper, Frame};
 
 // ---------------------------------------------------------------------------
+// Metrics types
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, serde::Serialize)]
+pub struct FaceRect {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub score: f32,
+}
+
+#[derive(Clone, serde::Serialize)]
+pub struct FrameMetrics {
+    pub detect_ms: f64,
+    pub swap_ms: f64,
+    pub total_ms: f64,
+    pub face_count: usize,
+    pub faces: Vec<FaceRect>,
+}
+
+impl Default for FrameMetrics {
+    fn default() -> Self {
+        Self {
+            detect_ms: 0.0,
+            swap_ms: 0.0,
+            total_ms: 0.0,
+            face_count: 0,
+            faces: vec![],
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Model container — uses std::sync::Mutex so models can be used from
 // both async handlers and spawn_blocking threads.
 // ---------------------------------------------------------------------------
@@ -35,8 +69,10 @@ pub struct Models {
 
 #[derive(Clone)]
 pub struct ServerState {
-    pub app:    Arc<RwLock<AppState>>,
-    pub models: Arc<Models>,
+    pub app:            Arc<RwLock<AppState>>,
+    pub models:         Arc<Models>,
+    pub metrics_tx:     tokio::sync::broadcast::Sender<String>,
+    pub gpu_provider:   String,
 }
 
 impl axum::extract::FromRef<ServerState> for Arc<RwLock<AppState>> {
@@ -74,6 +110,7 @@ pub fn build_router(server_state: ServerState) -> Router {
         .route("/camera/{index}", post(set_camera))
         .route("/settings",       get(get_settings).post(update_settings))
         .route("/ws/video",       get(ws_video))
+        .route("/ws/metrics",     get(ws_metrics))
         .layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024))
         .layer(cors)
         .with_state(server_state)
@@ -81,12 +118,15 @@ pub fn build_router(server_state: ServerState) -> Router {
 
 /// Build a `ServerState` with no models loaded (safe for unit/integration tests).
 pub fn test_state() -> ServerState {
+    let (metrics_tx, _) = tokio::sync::broadcast::channel(64);
     ServerState {
-        app:    Arc::new(RwLock::new(AppState::default())),
-        models: Arc::new(Models {
+        app:          Arc::new(RwLock::new(AppState::default())),
+        models:       Arc::new(Models {
             detector: Mutex::new(None),
             swapper:  Mutex::new(None),
         }),
+        metrics_tx,
+        gpu_provider: "Auto".to_string(),
     }
 }
 
@@ -94,8 +134,20 @@ pub fn test_state() -> ServerState {
 // Handlers
 // ---------------------------------------------------------------------------
 
-async fn health() -> impl IntoResponse {
-    Json(serde_json::json!({"status": "ok", "backend": "rust"}))
+async fn health(State(server_state): State<ServerState>) -> impl IntoResponse {
+    let models = &server_state.models;
+    let detector_ok = models.detector.lock().map(|g| g.is_some()).unwrap_or(false);
+    let swapper_ok  = models.swapper.lock().map(|g| g.is_some()).unwrap_or(false);
+
+    Json(serde_json::json!({
+        "status": "ok",
+        "backend": "rust",
+        "gpu_provider": server_state.gpu_provider,
+        "models": {
+            "detector": detector_ok,
+            "swapper":  swapper_ok,
+        }
+    }))
 }
 
 async fn upload_source(
@@ -465,6 +517,54 @@ async fn ws_video(
     ws.on_upgrade(move |socket| handle_video_ws(socket, server_state))
 }
 
+async fn ws_metrics(
+    ws: WebSocketUpgrade,
+    State(server_state): State<ServerState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_metrics_ws(socket, server_state.metrics_tx.subscribe()))
+}
+
+/// WebSocket handler that forwards FrameMetrics JSON to subscribed clients.
+async fn handle_metrics_ws(
+    mut socket: WebSocket,
+    mut rx: tokio::sync::broadcast::Receiver<String>,
+) {
+    use axum::extract::ws::Message;
+
+    tracing::info!("[WS] metrics client connected");
+
+    loop {
+        tokio::select! {
+            result = rx.recv() => {
+                match result {
+                    Ok(json) => {
+                        if let Err(e) = socket.send(Message::Text(json.into())).await {
+                            tracing::info!("[WS] metrics client disconnected: {e}");
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!("[WS] metrics receiver lagged by {n} messages");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            msg = socket.recv() => {
+                match msg {
+                    None | Some(Ok(Message::Close(_))) => {
+                        tracing::info!("[WS] metrics client closed connection");
+                        break;
+                    }
+                    Some(Err(e)) => { tracing::warn!("[WS] metrics receive error: {e}"); break; }
+                    Some(Ok(_))  => {}
+                }
+            }
+        }
+    }
+
+    tracing::info!("[WS] metrics handler exiting");
+}
+
 /// Pre-allocated test frame (640x480 solid blue). Fallback when camera is unavailable.
 fn generate_test_frame() -> &'static [u8] {
     use std::sync::OnceLock;
@@ -525,12 +625,12 @@ async fn handle_video_ws(mut socket: WebSocket, state: ServerState) {
                 let st = state.clone();
 
                 // All blocking work (camera read + inference) runs off the async runtime.
-                let jpeg_result = tokio::task::spawn_blocking(move || {
+                let frame_result = tokio::task::spawn_blocking(move || {
                     produce_frame(&cam, &st)
                 }).await;
 
-                let jpeg = match jpeg_result {
-                    Ok(Some(j)) => j,
+                let (jpeg, metrics) = match frame_result {
+                    Ok(Some(r)) => r,
                     Ok(None) => continue, // encode error, skip frame
                     Err(e) => { tracing::error!("[WS] task panic: {e}"); continue; }
                 };
@@ -538,6 +638,11 @@ async fn handle_video_ws(mut socket: WebSocket, state: ServerState) {
                 if let Err(e) = socket.send(Message::Binary(jpeg.into())).await {
                     tracing::info!("[WS] client disconnected: {e}");
                     break;
+                }
+
+                // Broadcast metrics JSON (best-effort; ignore send errors when no subscribers).
+                if let Ok(json) = serde_json::to_string(&metrics) {
+                    let _ = state.metrics_tx.send(json);
                 }
             }
 
@@ -557,13 +662,14 @@ async fn handle_video_ws(mut socket: WebSocket, state: ServerState) {
     tracing::info!("[WS] video handler exiting");
 }
 
-/// Produce one JPEG frame (blocking). Reads camera, optionally swaps face, encodes JPEG.
+/// Produce one JPEG frame with timing metrics (blocking).
+/// Reads camera, optionally swaps face, encodes JPEG.
 /// Returns None if encoding fails (caller skips the frame).
 fn produce_frame(
     camera: &Arc<std::sync::Mutex<Option<dlc_capture::CameraCapture>>>,
     state: &ServerState,
-) -> Option<Vec<u8>> {
-    tracing::debug!("[WS] produce_frame: start");
+) -> Option<(Vec<u8>, FrameMetrics)> {
+    let total_start = std::time::Instant::now();
 
     // Grab camera frame or fall back to test frame.
     let bgr_frame = {
@@ -572,61 +678,93 @@ fn produce_frame(
     };
 
     let bgr_frame = match bgr_frame {
-        Some(f) => {
-            tracing::debug!("[WS] got camera frame {}x{}", f.dim().1, f.dim().0);
-            f
-        }
+        Some(f) => f,
         None => {
-            // Fallback: test frame
+            // Fallback: test frame — no swap, zero metrics.
             let rgb = generate_test_frame();
-            return encode_jpeg(640, 480, rgb).ok();
+            let jpeg = encode_jpeg(640, 480, rgb).ok()?;
+            let metrics = FrameMetrics {
+                total_ms: total_start.elapsed().as_secs_f64() * 1000.0,
+                ..Default::default()
+            };
+            return Some((jpeg, metrics));
         }
     };
 
     // Check if source face is uploaded — if so, try swap.
-    // Use blocking_read() since we're on a blocking thread (not async).
     let source_bytes = {
         let app = state.app.blocking_read();
         app.source_image_bytes.clone()
     };
 
-    let output_frame = if let Some(src_bytes) = source_bytes {
-        tracing::debug!("[WS] attempting face swap");
+    let (output_frame, metrics) = if let Some(src_bytes) = source_bytes {
         match try_swap_frame_sync(&bgr_frame, &src_bytes, &state.models) {
-            Some(swapped) => {
-                tracing::debug!("[WS] swap succeeded");
-                swapped
+            Some((swapped, face_rects, detect_ms, swap_ms)) => {
+                let face_count = face_rects.len();
+                let metrics = FrameMetrics {
+                    detect_ms,
+                    swap_ms,
+                    total_ms: total_start.elapsed().as_secs_f64() * 1000.0,
+                    face_count,
+                    faces: face_rects,
+                };
+                (swapped, metrics)
             }
             None => {
-                tracing::debug!("[WS] swap failed, sending raw frame");
-                bgr_frame
+                let metrics = FrameMetrics {
+                    total_ms: total_start.elapsed().as_secs_f64() * 1000.0,
+                    ..Default::default()
+                };
+                (bgr_frame, metrics)
             }
         }
     } else {
-        bgr_frame
+        let metrics = FrameMetrics {
+            total_ms: total_start.elapsed().as_secs_f64() * 1000.0,
+            ..Default::default()
+        };
+        (bgr_frame, metrics)
     };
 
-    encode_bgr_frame_to_jpeg(&output_frame).ok()
+    let jpeg = encode_bgr_frame_to_jpeg(&output_frame).ok()?;
+    Some((jpeg, metrics))
 }
 
-/// Synchronous face swap (runs on blocking thread).
+/// Synchronous face swap with timing (runs on blocking thread).
+/// Returns (swapped_frame, face_rects, detect_ms, swap_ms) on success.
 fn try_swap_frame_sync(
     target_frame: &Frame,
     source_bytes: &[u8],
     models: &Arc<Models>,
-) -> Option<Frame> {
+) -> Option<(Frame, Vec<FaceRect>, f64, f64)> {
     let source_frame = decode_to_bgr_frame(source_bytes).ok()?;
 
-    // Detect faces in source and target.
-    let (source_face, target_face) = {
+    // Detect faces in source and target, timed.
+    let detect_start = std::time::Instant::now();
+    let (source_face, target_face, target_faces) = {
         let mut det_guard = models.detector.lock().ok()?;
         let detector = det_guard.as_mut()?;
         let sf = detector.detect(&source_frame, 0.3).ok()?.into_iter().next()?;
-        let tf = detector.detect(target_frame, 0.3).ok()?.into_iter().next()?;
-        (sf, tf)
+        let tfs = detector.detect(target_frame, 0.3).ok()?;
+        let tf = tfs.iter().next()?.clone();
+        (sf, tf, tfs)
     }; // detector guard dropped
+    let detect_ms = detect_start.elapsed().as_secs_f64() * 1000.0;
 
-    // Swap face.
+    // Build FaceRect list from detected target faces.
+    let face_rects: Vec<FaceRect> = target_faces
+        .iter()
+        .map(|f| FaceRect {
+            x: f.bbox[0],
+            y: f.bbox[1],
+            w: f.bbox[2] - f.bbox[0],
+            h: f.bbox[3] - f.bbox[1],
+            score: f.score,
+        })
+        .collect();
+
+    // Swap face, timed.
+    let swap_start = std::time::Instant::now();
     let mut swap_guard = models.swapper.lock().ok()?;
     let swapper = swap_guard.as_mut()?;
     let embedding = swapper.get_embedding(&source_frame, &source_face).ok()?;
@@ -634,5 +772,7 @@ fn try_swap_frame_sync(
     sf.embedding = Some(embedding);
     let mut output = target_frame.clone();
     swapper.swap(&sf, &target_face, &mut output).ok()?;
-    Some(output)
+    let swap_ms = swap_start.elapsed().as_secs_f64() * 1000.0;
+
+    Some((output, face_rects, detect_ms, swap_ms))
 }

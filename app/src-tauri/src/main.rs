@@ -4,21 +4,45 @@
 use tauri::Manager;
 use std::sync::Mutex;
 use std::process::{Child, Command};
+use sysinfo::System;
 
 // Hold sidecar child so it gets killed when the app exits
 struct SidecarChild(Mutex<Option<Child>>);
+
+struct MetricsState(Mutex<System>);
+
+#[derive(serde::Serialize)]
+struct SystemMetrics {
+    cpu_percent: f32,
+    ram_used_gb: f64,
+    ram_total_gb: f64,
+}
 
 #[tauri::command]
 fn get_backend_url() -> String {
     "http://localhost:8008".to_string()
 }
 
+#[tauri::command]
+fn get_system_metrics(state: tauri::State<MetricsState>) -> SystemMetrics {
+    let mut sys = state.0.lock().unwrap();
+    sys.refresh_cpu_usage();
+    sys.refresh_memory();
+    SystemMetrics {
+        cpu_percent: sys.global_cpu_usage(),
+        ram_used_gb: sys.used_memory() as f64 / 1_073_741_824.0,
+        ram_total_gb: sys.total_memory() as f64 / 1_073_741_824.0,
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![get_backend_url])
+        .invoke_handler(tauri::generate_handler![get_backend_url, get_system_metrics])
         .setup(|app| {
+            app.manage(MetricsState(Mutex::new(System::new_all())));
+
             let resource_dir = app.path().resource_dir()
                 .unwrap_or_else(|_| std::path::PathBuf::from("."));
             let models_dir = resource_dir.join("models");

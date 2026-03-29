@@ -23,7 +23,8 @@ async fn main() {
 
     // GPU provider: try DirectML first, fall back to CPU.
     let provider = GpuProvider::Auto;
-    tracing::info!("[SERVER] GPU provider: {:?}", provider);
+    let gpu_provider_name = format!("{:?}", provider);
+    tracing::info!("[SERVER] GPU provider: {}", gpu_provider_name);
 
     // Load ONNX models — optional; server starts without them and returns 503
     // on swap requests if missing.
@@ -37,12 +38,17 @@ async fn main() {
         Err(e) => { tracing::warn!("FaceSwapper unavailable: {e:#}");  None   }
     };
 
+    // Broadcast channel for per-frame metrics (capacity: 64 frames).
+    let (metrics_tx, _) = tokio::sync::broadcast::channel(64);
+
     let server_state = ServerState {
         app:    Arc::new(RwLock::new(app_state)),
         models: Arc::new(Models {
             detector: std::sync::Mutex::new(detector),
             swapper:  std::sync::Mutex::new(swapper),
         }),
+        metrics_tx,
+        gpu_provider: gpu_provider_name,
     };
 
     let app = build_router(server_state);

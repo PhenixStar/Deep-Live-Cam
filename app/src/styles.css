@@ -5,6 +5,8 @@
   --text: #e0e0e0;
   --primary: #3b82f6;
   --danger: #ef4444;
+  --success: #22c55e;
+  --muted: #888;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -23,6 +25,7 @@ body {
   height: 100vh;
 }
 
+/* ── Header ── */
 header {
   display: flex;
   justify-content: space-between;
@@ -30,6 +33,7 @@ header {
   padding: 12px 20px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 header h1 { font-size: 18px; font-weight: 600; }
@@ -48,30 +52,36 @@ header h1 { font-size: 18px; font-weight: 600; }
   border-radius: 50%;
 }
 
+/* ── Main layout ── */
 main {
   display: flex;
   flex: 1;
   overflow: hidden;
 }
 
+/* ── Controls panel (left sidebar) ── */
 .controls {
   width: 240px;
+  flex-shrink: 0;
   padding: 16px;
   background: var(--surface);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   gap: 16px;
+  overflow-y: auto;
 }
 
-.source-face label {
+.source-face label,
+.camera-select > label,
+.enhancers > label:first-child {
   display: block;
   font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin-bottom: 8px;
-  color: #888;
+  color: var(--muted);
 }
 
 .face-preview {
@@ -94,22 +104,22 @@ main {
   color: #666;
 }
 
+.source-score {
+  margin-top: 6px;
+  font-size: 12px;
+  font-family: monospace;
+  color: var(--success);
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  border-radius: 4px;
+  padding: 3px 7px;
+  display: inline-block;
+}
+
 .controls input[type="file"] {
   margin-top: 8px;
   font-size: 12px;
   width: 100%;
-}
-
-/* Camera dropdown */
-.camera-select > label,
-.enhancers > label:first-child {
-  display: block;
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 8px;
-  color: #888;
 }
 
 .camera-select select {
@@ -123,7 +133,7 @@ main {
   cursor: pointer;
 }
 
-/* Enhancer toggles */
+/* ── Enhancer toggles ── */
 .enhancers {
   display: flex;
   flex-direction: column;
@@ -145,6 +155,17 @@ main {
   cursor: pointer;
 }
 
+/* ── Debug overlay toggle ── */
+.debug-toggle-row {
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.debug-toggle {
+  accent-color: var(--success) !important;
+}
+
+/* ── Action buttons ── */
 .actions { margin-top: auto; }
 
 .btn {
@@ -161,6 +182,7 @@ main {
 .btn.primary { background: var(--primary); color: white; }
 .btn.danger { background: var(--danger); color: white; }
 
+/* ── Video preview (centre) ── */
 .preview {
   flex: 1;
   display: flex;
@@ -168,12 +190,31 @@ main {
   justify-content: center;
   position: relative;
   background: #000;
+  overflow: hidden;
+}
+
+.canvas-stack {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  max-height: 100%;
 }
 
 .video-canvas {
+  display: block;
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+}
+
+.debug-canvas {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  max-width: 100%;
+  max-height: 100%;
 }
 
 .overlay {
@@ -182,10 +223,62 @@ main {
   font-size: 16px;
 }
 
+/* ── Metrics panel (right sidebar) ── */
+.metrics-panel {
+  width: 200px;
+  flex-shrink: 0;
+  padding: 16px 12px;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+}
+
+.metric-section {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.metric-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+
+.metric-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.metric-label {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.metric-value {
+  font-family: "SF Mono", "Fira Code", Consolas, monospace;
+  font-size: 12px;
+  color: var(--text);
+  text-align: right;
+}
+
+/* ── Error bar ── */
 .error {
   padding: 8px 20px;
   background: #2d1010;
   color: var(--danger);
   font-size: 13px;
   border-top: 1px solid #3a1515;
+  flex-shrink: 0;
 }

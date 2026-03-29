@@ -1,45 +1,53 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { ControlsPanel } from "./components/controls-panel";
+import { VideoCanvas } from "./components/video-canvas";
+import { MetricsPanel } from "./components/metrics-panel";
+import { useMetricsWs } from "./hooks/use-metrics-ws";
+import { useSystemMetrics } from "./hooks/use-system-metrics";
+import type { Status, Camera, Enhancers } from "./types";
 
 const API_BASE = "http://localhost:8008";
-
-type Status = "disconnected" | "connecting" | "connected" | "processing";
-
-interface Camera {
-  index: number;
-  name: string;
-}
-
-interface Enhancers {
-  face_enhancer: boolean;
-  face_enhancer_gpen256: boolean;
-  face_enhancer_gpen512: boolean;
-}
 
 export default function App() {
   const [status, setStatus] = useState<Status>("disconnected");
   const [sourceImage, setSourceImage] = useState<string | null>(null);
+  const [sourceScore, setSourceScore] = useState<number | null>(null);
   const [fps, setFps] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [cameras, setCameras] = useState<Camera[]>([]);
   const [selectedCamera, setSelectedCamera] = useState<number>(0);
+  const [showDebugOverlay, setShowDebugOverlay] = useState(false);
+  const [gpuProvider, setGpuProvider] = useState("");
   const [enhancers, setEnhancers] = useState<Enhancers>({
     face_enhancer: false,
     face_enhancer_gpen256: false,
     face_enhancer_gpen512: false,
   });
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+
   const wsRef = useRef<WebSocket | null>(null);
 
-  // Fetch available cameras and current settings on mount
+  const inferenceMetrics = useMetricsWs(status === "processing");
+  const systemMetrics = useSystemMetrics(2000);
+
+  const faces = inferenceMetrics?.faces ?? [];
+
+  // Initial data fetch
   useEffect(() => {
     fetch(`${API_BASE}/cameras`)
       .then((res) => res.json())
-      .then((data) => setCameras(data.cameras))
+      .then((data: { cameras: Camera[] }) => setCameras(data.cameras))
       .catch(() => setError("Failed to load cameras"));
 
     fetch(`${API_BASE}/settings`)
       .then((res) => res.json())
-      .then((data) => setEnhancers(data.fp_ui))
+      .then((data: { fp_ui: Enhancers }) => setEnhancers(data.fp_ui))
+      .catch(() => {});
+
+    fetch(`${API_BASE}/health`)
+      .then((res) => res.json())
+      .then((data: { gpu_provider?: string }) => {
+        if (data.gpu_provider) setGpuProvider(data.gpu_provider);
+      })
       .catch(() => {});
   }, []);
 
@@ -48,38 +56,9 @@ export default function App() {
     setError(null);
     const ws = new WebSocket("ws://localhost:8008/ws/video");
     wsRef.current = ws;
-
     ws.binaryType = "arraybuffer";
-    let frameCount = 0;
-    let lastTime = performance.now();
-
     ws.onopen = () => setStatus("connected");
-
-    ws.onmessage = async (event) => {
-      setStatus("processing");
-      const blob = new Blob([event.data], { type: "image/jpeg" });
-      try {
-        const bitmap = await createImageBitmap(blob);
-        const canvas = canvasRef.current;
-        if (canvas) {
-          canvas.width = bitmap.width;
-          canvas.height = bitmap.height;
-          const ctx = canvas.getContext("2d");
-          ctx?.drawImage(bitmap, 0, 0);
-        }
-        bitmap.close();
-      } catch {
-        // Corrupt frame — skip silently
-      }
-      frameCount++;
-      const now = performance.now();
-      if (now - lastTime >= 1000) {
-        setFps(Math.round(frameCount / ((now - lastTime) / 1000)));
-        frameCount = 0;
-        lastTime = now;
-      }
-    };
-
+    ws.onmessage = () => setStatus("processing");
     ws.onerror = () => setError("Connection failed — is the backend running?");
     ws.onclose = () => {
       setStatus("disconnected");
@@ -99,7 +78,6 @@ export default function App() {
         const res = await fetch(`${API_BASE}/camera/${idx}`, { method: "POST" });
         if (res.ok) {
           setSelectedCamera(idx);
-          // Reconnect WS to pick up new camera
           if (wsRef.current) {
             disconnect();
             setTimeout(connect, 300);
@@ -138,7 +116,9 @@ export default function App() {
           body: formData,
         });
         if (res.ok) {
+          const data = (await res.json()) as { score?: number };
           setSourceImage(URL.createObjectURL(file));
+          setSourceScore(data.score ?? null);
           setError(null);
         } else {
           setError("Failed to upload source face");
@@ -150,13 +130,14 @@ export default function App() {
     [],
   );
 
+  // Cleanup WS on unmount
   useEffect(() => {
     return () => {
       wsRef.current?.close();
     };
   }, []);
 
-  // Check for app updates after a short delay (don't block startup)
+  // Auto-update check (non-blocking)
   useEffect(() => {
     const timer = setTimeout(async () => {
       try {
@@ -166,12 +147,10 @@ export default function App() {
           const confirmed = window.confirm(
             `Update ${update.version} available. Download now?`,
           );
-          if (confirmed) {
-            await update.downloadAndInstall();
-          }
+          if (confirmed) await update.downloadAndInstall();
         }
       } catch {
-        // Update check is non-critical; silently ignore failures
+        // Non-critical; silently ignore
       }
     }, 5000);
     return () => clearTimeout(timer);
@@ -184,12 +163,6 @@ export default function App() {
     processing: "#3b82f6",
   }[status];
 
-  const enhancerLabels: { key: keyof Enhancers; label: string }[] = [
-    { key: "face_enhancer", label: "GFPGAN" },
-    { key: "face_enhancer_gpen256", label: "GPEN-256" },
-    { key: "face_enhancer_gpen512", label: "GPEN-512" },
-  ];
-
   return (
     <div className="app">
       <header>
@@ -201,67 +174,35 @@ export default function App() {
       </header>
 
       <main>
-        <section className="controls">
-          <div className="source-face">
-            <label>Source Face</label>
-            {sourceImage ? (
-              <img src={sourceImage} alt="source" className="face-preview" />
-            ) : (
-              <div className="placeholder">No face selected</div>
-            )}
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleSourceUpload}
-            />
-          </div>
-
-          <div className="camera-select">
-            <label>Camera</label>
-            <select value={selectedCamera} onChange={handleCameraChange}>
-              {cameras.map((c) => (
-                <option key={c.index} value={c.index}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="enhancers">
-            <label>Face Enhancers</label>
-            {enhancerLabels.map(({ key, label }) => (
-              <label key={key} className="toggle">
-                <input
-                  type="checkbox"
-                  checked={enhancers[key]}
-                  onChange={(e) => handleEnhancerToggle(key, e.target.checked)}
-                />
-                {label}
-              </label>
-            ))}
-          </div>
-
-          <div className="actions">
-            {status === "disconnected" ? (
-              <button className="btn primary" onClick={connect}>
-                Start Live
-              </button>
-            ) : (
-              <button className="btn danger" onClick={disconnect}>
-                Stop
-              </button>
-            )}
-          </div>
-        </section>
-
-        <section className="preview">
-          <canvas ref={canvasRef} className="video-canvas" />
-          {status === "disconnected" && (
-            <div className="overlay">
-              Click &quot;Start Live&quot; to begin face swap
-            </div>
-          )}
-        </section>
+        <ControlsPanel
+          status={status}
+          cameras={cameras}
+          selectedCamera={selectedCamera}
+          enhancers={enhancers}
+          sourceImage={sourceImage}
+          sourceScore={sourceScore}
+          showDebugOverlay={showDebugOverlay}
+          onConnect={connect}
+          onDisconnect={disconnect}
+          onCameraChange={handleCameraChange}
+          onEnhancerToggle={handleEnhancerToggle}
+          onSourceUpload={handleSourceUpload}
+          onToggleDebug={() => setShowDebugOverlay((v) => !v)}
+        />
+        <VideoCanvas
+          wsRef={wsRef}
+          status={status}
+          onFpsUpdate={setFps}
+          faces={faces}
+          showDebugOverlay={showDebugOverlay}
+        />
+        <MetricsPanel
+          fps={fps}
+          inferenceMetrics={inferenceMetrics}
+          systemMetrics={systemMetrics}
+          gpuProvider={gpuProvider}
+          sourceScore={sourceScore}
+        />
       </main>
 
       {error && <div className="error">{error}</div>}
