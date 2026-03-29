@@ -2,7 +2,7 @@
 
 **Priority:** P0
 **Effort:** 10h
-**Status:** Pending
+**Status:** Done (~95%) — audited 2026-03-29
 **Depends on:** Phase 1 (GPU metrics)
 
 ## Overview
@@ -176,18 +176,19 @@ Displays in a sidebar:
 
 ## Todo
 
-- [ ] Add timing instrumentation to `produce_frame`
-- [ ] Create `FrameMetrics` struct and broadcast channel
-- [ ] Add `/ws/metrics` WS endpoint
-- [ ] Extend `/health` with EP + model status
-- [ ] Add `sysinfo` to Tauri shell, create metrics commands
-- [ ] Split `App.tsx` into components
-- [ ] Create `VideoCanvas` with debug overlay
-- [ ] Create `MetricsPanel` component
-- [ ] Create `ControlsPanel` with EP selector
-- [ ] Create `use-metrics-ws` hook
-- [ ] Create `use-system-metrics` hook
-- [ ] Style metrics panel and overlay
+- [x] Add timing instrumentation to `produce_frame`
+- [x] Create `FrameMetrics` struct and broadcast channel
+- [x] Add `/ws/metrics` WS endpoint
+- [x] Extend `/health` with EP + model status
+- [x] Add `sysinfo` to Tauri shell, create metrics commands
+- [x] Split `App.tsx` into components
+- [x] Create `VideoCanvas` with debug overlay
+- [x] Create `MetricsPanel` component
+- [x] Create `ControlsPanel` (EP selector deferred — display-only)
+- [x] Create `use-metrics-ws` hook
+- [x] Create `use-system-metrics` hook
+- [x] Style metrics panel and overlay
+- [ ] GPU utilization metric (requires platform-specific lib, not available via sysinfo)
 
 ## Success Criteria
 

@@ -222,24 +222,22 @@ async fn upload_source(
     State(state): State<Arc<RwLock<AppState>>>,
     mut multipart: axum::extract::Multipart,
 ) -> impl IntoResponse {
-    let field = loop {
-        match multipart.next_field().await {
-            Ok(Some(f)) => break f,
-            Ok(None) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({"error": "no file field in multipart body"})),
-                )
-                    .into_response();
-            }
-            Err(e) => {
-                tracing::error!("multipart error: {e}");
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({"error": format!("multipart error: {e}")})),
-                )
-                    .into_response();
-            }
+    let field = match multipart.next_field().await {
+        Ok(Some(f)) => f,
+        Ok(None) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "no file field in multipart body"})),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            tracing::error!("multipart error: {e}");
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("multipart error: {e}")})),
+            )
+                .into_response();
         }
     };
 
@@ -543,7 +541,10 @@ async fn set_camera(
     State(state): State<Arc<RwLock<AppState>>>,
     Path(index): Path<u32>,
 ) -> impl IntoResponse {
-    let cameras = dlc_capture::list_cameras().unwrap_or_default();
+    // Camera probing can block; run off the async runtime (same as list_cameras).
+    let cameras = tokio::task::spawn_blocking(|| {
+        dlc_capture::list_cameras().unwrap_or_default()
+    }).await.unwrap_or_default();
     if !cameras.iter().any(|c| c.index == index) {
         return (
             StatusCode::BAD_REQUEST,

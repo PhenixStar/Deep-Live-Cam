@@ -11,20 +11,15 @@ use anyhow::Result;
 use ndarray::Array3;
 
 /// GPU execution provider configuration.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum GpuProvider {
     /// Try DirectML first, fall back to CPU.
+    #[default]
     Auto,
     /// Force DirectML with a specific device ID.
     DirectML { device_id: i32 },
     /// CPU only.
     Cpu,
-}
-
-impl Default for GpuProvider {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 impl GpuProvider {

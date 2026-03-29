@@ -126,13 +126,18 @@ fn parse_remote_flag() -> bool {
 fn generate_token() -> String {
     use std::collections::hash_map::RandomState;
     use std::hash::{BuildHasher, Hasher};
-    let s = RandomState::new();
-    let mut h = s.build_hasher();
-    h.write_u64(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos() as u64,
-    );
-    format!("{:016x}", h.finish())
+    // Combine multiple sources of randomness for a stronger token.
+    // Each RandomState::new() seeds from the OS; we hash two independent
+    // states together with timing data to produce 128 bits of output.
+    let s1 = RandomState::new();
+    let s2 = RandomState::new();
+    let mut h1 = s1.build_hasher();
+    let mut h2 = s2.build_hasher();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u64;
+    h1.write_u64(nanos);
+    h2.write_u64(nanos.wrapping_mul(0x517cc1b727220a95)); // mixing constant
+    format!("{:016x}{:016x}", h1.finish(), h2.finish())
 }

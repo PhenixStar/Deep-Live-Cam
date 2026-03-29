@@ -2,7 +2,7 @@
 
 **Priority:** P2
 **Effort:** 5h
-**Status:** Pending
+**Status:** Partial (~60%) — audited 2026-03-29
 
 ## Overview
 
@@ -49,12 +49,14 @@ Show connected remote clients count in metrics panel.
 
 ## Todo
 
-- [ ] Add `--remote` CLI flag
-- [ ] Generate and store API token
-- [ ] Add auth middleware
-- [ ] Update CORS for remote mode
-- [ ] Add server mode toggle in UI
-- [ ] Display LAN IP + token when remote enabled
+- [x] Add `--remote` CLI flag
+- [x] Generate API token (ephemeral, not persisted)
+- [ ] **[SECURITY]** Add auth middleware (token generated but never validated on requests)
+- [x] Update CORS for remote mode (allow_origin(Any) when --remote)
+- [ ] Add server mode toggle in UI (currently display-only, no sidecar restart)
+- [x] Display LAN IP + token when remote enabled (in ControlsPanel)
+- [ ] Persist token to `~/.deep-forge/api-token`
+- [ ] Show connected remote clients count
 
 ## Success Criteria
 

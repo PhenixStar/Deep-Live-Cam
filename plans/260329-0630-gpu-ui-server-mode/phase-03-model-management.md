@@ -2,7 +2,7 @@
 
 **Priority:** P1
 **Effort:** 8h
-**Status:** Pending
+**Status:** Done (~95%) — audited 2026-03-29
 **Depends on:** Phase 2 (uses metrics panel pattern)
 
 ## Overview
@@ -71,12 +71,14 @@ On app mount, fetch `/models/status`. If any required model is missing, show a p
 
 ## Todo
 
-- [ ] Add `GET /models/status` endpoint
-- [ ] Create Tauri download command with progress events
-- [ ] Create model-manager React component
-- [ ] Add startup model check with banner
-- [ ] Add model download URLs as constants
-- [ ] Add models_dir to settings response
+- [x] Add `GET /models/status` endpoint
+- [x] Create Tauri download command with progress events
+- [x] Create model-manager React component
+- [x] Add startup model check with banner
+- [x] Add model download URLs as constants (in use-models.ts)
+- [x] Add models_dir to settings response (via Tauri get_models_dir command)
+- [ ] Add `loaded` field to `/models/status` (cross-reference with Models struct)
+- [ ] Model hot-reload after download (or "restart required" banner)
 
 ## Success Criteria
 

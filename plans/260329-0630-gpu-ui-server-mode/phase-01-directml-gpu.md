@@ -2,7 +2,7 @@
 
 **Priority:** P0 — Critical (current 2-4 FPS on CPU is unusable)
 **Effort:** 8h
-**Status:** Pending
+**Status:** Done (~90%) — audited 2026-03-29
 
 ## Context
 
@@ -172,18 +172,18 @@ Add ORT DirectML DLLs to the Tauri bundle alongside OpenCV DLLs.
 
 ## Todo
 
-- [ ] Create `scripts/setup-directml-dlls.ps1`
-- [ ] Update workspace `ort` dep: remove `download-binaries`, add `directml`
-- [ ] Create `.cargo/config.toml` with `ORT_LIB_PATH`
-- [ ] Add `GpuProvider` enum to `dlc-core/src/lib.rs`
-- [ ] Update `FaceDetector::new()` with EP config
-- [ ] Update `FaceSwapper::new()` with EP config
-- [ ] Update `main.rs` to pass `GpuProvider::Auto`
-- [ ] Update `build-rust-sidecar-win.ps1`
-- [ ] Copy ORT DLLs to install dir
+- [x] Create `scripts/setup-directml-dlls.ps1`
+- [ ] Update workspace `ort` dep: remove `download-binaries`, add `directml` (currently uses download-binaries globally; works via ORT_LIB_PATH on Windows)
+- [x] Create `.cargo/config.toml` with `ORT_LIB_PATH`
+- [x] Add `GpuProvider` enum to `dlc-core/src/lib.rs`
+- [x] Update `FaceDetector::new()` with EP config
+- [x] Update `FaceSwapper::new()` with EP config
+- [x] Update `main.rs` to pass `GpuProvider::Auto`
+- [x] Update `build-rust-sidecar-win.ps1`
+- [x] Copy ORT DLLs to install dir
 - [ ] Test: verify DirectML EP is selected in logs
 - [ ] Test: measure FPS improvement vs CPU baseline
-- [ ] Add `/health` endpoint field showing active EP
+- [x] Add `/health` endpoint field showing active EP (shows config enum, not runtime EP name)
 
 ## Success Criteria
 

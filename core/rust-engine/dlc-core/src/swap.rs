@@ -152,15 +152,17 @@ fn bgr_hwc_to_rgb_nchw_normalized(
     anyhow::ensure!(img.shape() == [h, w, 3], "Expected [{h},{w},3] frame");
     let mut data = vec![0f32; 3 * h * w];
     let hw = h * w;
+    let (ch_r, ch_g, ch_b) = (0, hw, 2 * hw);
     for y in 0..h {
         for x in 0..w {
             // Frame is BGR; swap to RGB for the model.
             let b = img[[y, x, 0]] as f32;
             let g = img[[y, x, 1]] as f32;
             let r = img[[y, x, 2]] as f32;
-            data[0 * hw + y * w + x] = r / 127.5 - 1.0;
-            data[1 * hw + y * w + x] = g / 127.5 - 1.0;
-            data[2 * hw + y * w + x] = b / 127.5 - 1.0;
+            let px = y * w + x;
+            data[ch_r + px] = r / 127.5 - 1.0;
+            data[ch_g + px] = g / 127.5 - 1.0;
+            data[ch_b + px] = b / 127.5 - 1.0;
         }
     }
     Ok((vec![1i64, 3, h as i64, w as i64], data))
@@ -175,14 +177,16 @@ fn bgr_hwc_to_rgb_nchw_01(
     anyhow::ensure!(img.shape() == [h, w, 3], "Expected [{h},{w},3] frame");
     let mut data = vec![0f32; 3 * h * w];
     let hw = h * w;
+    let (ch_r, ch_g, ch_b) = (0, hw, 2 * hw);
     for y in 0..h {
         for x in 0..w {
             let b = img[[y, x, 0]] as f32 / 255.0;
             let g = img[[y, x, 1]] as f32 / 255.0;
             let r = img[[y, x, 2]] as f32 / 255.0;
-            data[0 * hw + y * w + x] = r;
-            data[1 * hw + y * w + x] = g;
-            data[2 * hw + y * w + x] = b;
+            let px = y * w + x;
+            data[ch_r + px] = r;
+            data[ch_g + px] = g;
+            data[ch_b + px] = b;
         }
     }
     Ok((vec![1i64, 3, h as i64, w as i64], data))
@@ -191,12 +195,14 @@ fn bgr_hwc_to_rgb_nchw_01(
 /// RGB NCHW f32 `[0,1]` slice → BGR HWC u8 `Frame`.
 fn rgb_nchw_01_to_bgr_hwc(data: &[f32], h: usize, w: usize) -> Frame {
     let hw = h * w;
+    let (ch_r, ch_g, ch_b) = (0, hw, 2 * hw);
     let mut out = ndarray::Array3::<u8>::zeros((h, w, 3));
     for y in 0..h {
         for x in 0..w {
-            let r = (data[0 * hw + y * w + x].clamp(0.0, 1.0) * 255.0).round() as u8;
-            let g = (data[1 * hw + y * w + x].clamp(0.0, 1.0) * 255.0).round() as u8;
-            let b = (data[2 * hw + y * w + x].clamp(0.0, 1.0) * 255.0).round() as u8;
+            let px = y * w + x;
+            let r = (data[ch_r + px].clamp(0.0, 1.0) * 255.0).round() as u8;
+            let g = (data[ch_g + px].clamp(0.0, 1.0) * 255.0).round() as u8;
+            let b = (data[ch_b + px].clamp(0.0, 1.0) * 255.0).round() as u8;
             out[[y, x, 0]] = b; // store as BGR
             out[[y, x, 1]] = g;
             out[[y, x, 2]] = r;
