@@ -250,23 +250,26 @@ fn get_face_mask() -> &'static [f32] {
 }
 
 /// For each pixel in `frame`, compute where it maps in the 128x128 `swapped`
-/// patch (via the inverse of `fwd_mat`).  Alpha-blend using an elliptical
-/// face mask for seamless edges.
+/// patch using the FORWARD matrix (frame→patch), then alpha-blend using an
+/// elliptical face mask for seamless edges.
 fn paste_back(frame: &mut Frame, swapped: &Frame, fwd_mat: &[f32; 6]) -> Result<()> {
     let (fh, fw) = (frame.shape()[0], frame.shape()[1]);
     let (ph, pw) = (128usize, 128usize);
     let mask = get_face_mask();
 
-    let inv = invert_affine(fwd_mat)?;
-    let (ia, ib, itx, ic, id, ity) = (inv[0], inv[1], inv[2], inv[3], inv[4], inv[5]);
+    // fwd_mat maps frame coords → patch coords directly.
+    // No inversion needed — we iterate frame pixels and use fwd_mat to find patch coords.
+    let (ia, ib, itx, ic, id, ity) = (fwd_mat[0], fwd_mat[1], fwd_mat[2],
+                                       fwd_mat[3], fwd_mat[4], fwd_mat[5]);
 
-    // Compute ROI: transform 128x128 patch corners to frame coords via fwd_mat
+    // Compute ROI: transform 128x128 patch corners to frame coords via inv_mat.
+    let inv = invert_affine(fwd_mat)?;
     let corners = [(0.0f32, 0.0f32), (pw as f32, 0.0), (0.0, ph as f32), (pw as f32, ph as f32)];
     let (mut min_x, mut min_y) = (fw as f32, fh as f32);
     let (mut max_x, mut max_y) = (0.0f32, 0.0f32);
     for (cx, cy) in &corners {
-        let fx = fwd_mat[0] * cx + fwd_mat[1] * cy + fwd_mat[2];
-        let fy = fwd_mat[3] * cx + fwd_mat[4] * cy + fwd_mat[5];
+        let fx = inv[0] * cx + inv[1] * cy + inv[2];
+        let fy = inv[3] * cx + inv[4] * cy + inv[5];
         min_x = min_x.min(fx); min_y = min_y.min(fy);
         max_x = max_x.max(fx); max_y = max_y.max(fy);
     }
