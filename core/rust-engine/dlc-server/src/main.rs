@@ -4,7 +4,7 @@
 
 use dlc_server::router::{build_router, Models, ServerState};
 use dlc_server::state::AppState;
-use dlc_core::{detect::FaceDetector, swap::FaceSwapper};
+use dlc_core::{detect::FaceDetector, swap::FaceSwapper, GpuProvider};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -21,14 +21,18 @@ async fn main() {
 
     tracing::info!("[SERVER] models_dir = {}", app_state.models_dir.display());
 
+    // GPU provider: try DirectML first, fall back to CPU.
+    let provider = GpuProvider::Auto;
+    tracing::info!("[SERVER] GPU provider: {:?}", provider);
+
     // Load ONNX models — optional; server starts without them and returns 503
     // on swap requests if missing.
     let det_path = app_state.models_dir.join("buffalo_l/buffalo_l/det_10g.onnx");
-    let detector = match FaceDetector::new(&det_path) {
+    let detector = match FaceDetector::new(&det_path, &provider) {
         Ok(d)  => { tracing::info!("FaceDetector loaded");             Some(d) }
         Err(e) => { tracing::warn!("FaceDetector unavailable: {e:#}"); None   }
     };
-    let swapper = match FaceSwapper::new(&app_state.models_dir) {
+    let swapper = match FaceSwapper::new(&app_state.models_dir, &provider) {
         Ok(s)  => { tracing::info!("FaceSwapper loaded");              Some(s) }
         Err(e) => { tracing::warn!("FaceSwapper unavailable: {e:#}");  None   }
     };

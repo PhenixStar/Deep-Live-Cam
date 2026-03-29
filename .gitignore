@@ -20,6 +20,9 @@ app/src-tauri/sidecar-launcher/target/
 # Rust engine build artifacts
 core/rust-engine/target/
 
+# ORT DirectML DLLs (downloaded via scripts/setup-directml-dlls.ps1)
+core/rust-engine/ort-dml-libs/
+
 # Models (downloaded at runtime)
 core/models/*.onnx
 

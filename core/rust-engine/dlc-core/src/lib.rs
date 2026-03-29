@@ -10,6 +10,64 @@ pub mod preprocess;
 use anyhow::Result;
 use ndarray::Array3;
 
+/// GPU execution provider configuration.
+#[derive(Debug, Clone)]
+pub enum GpuProvider {
+    /// Try DirectML first, fall back to CPU.
+    Auto,
+    /// Force DirectML with a specific device ID.
+    DirectML { device_id: i32 },
+    /// CPU only.
+    Cpu,
+}
+
+impl Default for GpuProvider {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+impl GpuProvider {
+    /// Load an ONNX model with the appropriate execution providers.
+    pub fn load_session(&self, model_path: &std::path::Path) -> Result<ort::session::Session> {
+        use ort::ep;
+
+        let device_id = match self {
+            GpuProvider::DirectML { device_id } => *device_id,
+            _ => 0,
+        };
+
+        let session = match self {
+            GpuProvider::Auto | GpuProvider::DirectML { .. } => {
+                // DirectML requires memory pattern disabled.
+                ort::session::Session::builder()
+                    .map_err(|e| anyhow::anyhow!("Session::builder: {e}"))?
+                    .with_memory_pattern(false)
+                    .map_err(|e| anyhow::anyhow!("with_memory_pattern: {e}"))?
+                    .with_execution_providers([
+                        ep::DirectML::default().with_device_id(device_id).build(),
+                        ep::CPU::default().build(),
+                    ])
+                    .map_err(|e| anyhow::anyhow!("with_execution_providers: {e}"))?
+                    .commit_from_file(model_path)
+                    .map_err(|e| anyhow::anyhow!("commit_from_file: {e}"))?
+            }
+            GpuProvider::Cpu => {
+                ort::session::Session::builder()
+                    .map_err(|e| anyhow::anyhow!("Session::builder: {e}"))?
+                    .with_execution_providers([
+                        ep::CPU::default().build(),
+                    ])
+                    .map_err(|e| anyhow::anyhow!("with_execution_providers: {e}"))?
+                    .commit_from_file(model_path)
+                    .map_err(|e| anyhow::anyhow!("commit_from_file: {e}"))?
+            }
+        };
+
+        Ok(session)
+    }
+}
+
 /// A detected face with bounding box, landmarks, and embedding.
 #[derive(Debug, Clone)]
 pub struct DetectedFace {
@@ -70,8 +128,8 @@ pub fn validate_models(models_dir: &std::path::Path, _providers: &[String]) -> R
     // Validate ort can load at least one model
     let det_path = models_dir.join("buffalo_l/buffalo_l/det_10g.onnx");
     if det_path.exists() {
-        let _session = ort::session::Session::builder()?
-            .commit_from_file(det_path)?;
+        let provider = GpuProvider::Cpu;
+        let _session = provider.load_session(&det_path)?;
         tracing::info!("ort session creation OK (det_10g.onnx)");
     }
 

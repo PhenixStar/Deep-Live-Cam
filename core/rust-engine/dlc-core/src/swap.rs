@@ -29,20 +29,16 @@ impl FaceSwapper {
     /// Expected paths:
     /// - `<models_dir>/buffalo_l/buffalo_l/w600k_r50.onnx`  (ArcFace R50)
     /// - `<models_dir>/inswapper_128.onnx`                  (inswapper)
-    pub fn new(models_dir: &Path) -> Result<Self> {
+    pub fn new(models_dir: &Path, provider: &crate::GpuProvider) -> Result<Self> {
         let arcface_path = models_dir.join("buffalo_l/buffalo_l/w600k_r50.onnx");
         let swap_path = models_dir.join("inswapper_128.onnx");
 
         tracing::info!("Loading ArcFace from {}", arcface_path.display());
-        let arcface_session = Session::builder()
-            .context("ArcFace: session builder failed")?
-            .commit_from_file(&arcface_path)
+        let arcface_session = provider.load_session(&arcface_path)
             .with_context(|| format!("ArcFace: failed to load {}", arcface_path.display()))?;
 
         tracing::info!("Loading inswapper from {}", swap_path.display());
-        let swap_session = Session::builder()
-            .context("inswapper: session builder failed")?
-            .commit_from_file(&swap_path)
+        let swap_session = provider.load_session(&swap_path)
             .with_context(|| format!("inswapper: failed to load {}", swap_path.display()))?;
 
         Ok(Self { arcface_session, swap_session })

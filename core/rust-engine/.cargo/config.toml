@@ -1,0 +1,2 @@
+[env]
+ORT_LIB_PATH = { value = "ort-dml-libs", relative = true }
