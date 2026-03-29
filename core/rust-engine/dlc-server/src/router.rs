@@ -563,6 +563,8 @@ fn produce_frame(
     camera: &Arc<std::sync::Mutex<Option<dlc_capture::CameraCapture>>>,
     state: &ServerState,
 ) -> Option<Vec<u8>> {
+    tracing::debug!("[WS] produce_frame: start");
+
     // Grab camera frame or fall back to test frame.
     let bgr_frame = {
         let mut cam_guard = camera.lock().unwrap();
@@ -570,7 +572,10 @@ fn produce_frame(
     };
 
     let bgr_frame = match bgr_frame {
-        Some(f) => f,
+        Some(f) => {
+            tracing::debug!("[WS] got camera frame {}x{}", f.dim().1, f.dim().0);
+            f
+        }
         None => {
             // Fallback: test frame
             let rgb = generate_test_frame();
@@ -579,16 +584,23 @@ fn produce_frame(
     };
 
     // Check if source face is uploaded — if so, try swap.
-    // Use try_lock to avoid blocking if another task holds the state.
+    // Use blocking_read() since we're on a blocking thread (not async).
     let source_bytes = {
-        let app = state.app.try_read().ok()?;
+        let app = state.app.blocking_read();
         app.source_image_bytes.clone()
     };
 
     let output_frame = if let Some(src_bytes) = source_bytes {
+        tracing::debug!("[WS] attempting face swap");
         match try_swap_frame_sync(&bgr_frame, &src_bytes, &state.models) {
-            Some(swapped) => swapped,
-            None => bgr_frame,
+            Some(swapped) => {
+                tracing::debug!("[WS] swap succeeded");
+                swapped
+            }
+            None => {
+                tracing::debug!("[WS] swap failed, sending raw frame");
+                bgr_frame
+            }
         }
     } else {
         bgr_frame
