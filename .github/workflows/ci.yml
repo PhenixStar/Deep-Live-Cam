@@ -41,8 +41,8 @@ jobs:
       - name: Create sidecar placeholder
         run: |
           mkdir -p app/src-tauri/binaries
-          touch "app/src-tauri/binaries/deep-live-cam-server-x86_64-unknown-linux-gnu"
-          chmod +x "app/src-tauri/binaries/deep-live-cam-server-x86_64-unknown-linux-gnu"
+          touch "app/src-tauri/binaries/deep-forge-server-x86_64-unknown-linux-gnu"
+          chmod +x "app/src-tauri/binaries/deep-forge-server-x86_64-unknown-linux-gnu"
 
       - name: Rust check
         working-directory: app/src-tauri

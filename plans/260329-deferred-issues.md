@@ -2,16 +2,16 @@
 
 ## Rebranding: "Deep Live Cam" → "Deep Forge" / "DeFo"
 
-- [ ] Rename `productName` in `app/src-tauri/tauri.conf.json`
-- [ ] Update `identifier` from `com.phenixstar.deep-live-cam` to `com.phenixstar.deep-forge`
-- [ ] Update `app/package.json` name
-- [ ] Rename Cargo package names (`deep-live-cam-app` → `deep-forge-app`)
-- [ ] Update sidecar binary name references
-- [ ] Update `resolve_server_exe()` patterns
-- [ ] Update all UI text ("Deep Live Cam" → "Deep Forge")
-- [ ] Update window title
-- [ ] Update install directory name
-- [ ] Update README, CONTRIBUTING
+- [x] Rename `productName` in `app/src-tauri/tauri.conf.json`
+- [x] Update `identifier` from `com.phenixstar.deep-live-cam` to `com.phenixstar.deep-forge`
+- [x] Update `app/package.json` name
+- [x] Rename Cargo package names (`deep-live-cam-app` → `deep-forge-app`)
+- [x] Update sidecar binary name references (`deep-forge-server`)
+- [x] Update `resolve_server_exe()` patterns
+- [x] Update all UI text ("Deep Live Cam" → "Deep Forge")
+- [x] Update window title
+- [x] Update install directory name
+- [x] Update README, CONTRIBUTING
 
 ## Source Face Gallery / Profile Catalog
 

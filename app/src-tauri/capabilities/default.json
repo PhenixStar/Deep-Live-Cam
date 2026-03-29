@@ -8,7 +8,7 @@
       "identifier": "shell:allow-spawn",
       "allow": [
         {
-          "name": "binaries/deep-live-cam-server",
+          "name": "binaries/deep-forge-server",
           "sidecar": true,
           "args": true
         }

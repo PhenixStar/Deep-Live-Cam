@@ -1,5 +1,5 @@
 [package]
-name = "dlc-server"
+name = "deep-forge-server"
 description = "HTTP/WebSocket server replacing Python FastAPI sidecar"
 version.workspace = true
 edition.workspace = true
@@ -11,7 +11,7 @@ name = "dlc_server"
 path = "src/lib.rs"
 
 [[bin]]
-name = "dlc-server"
+name = "deep-forge-server"
 path = "src/main.rs"
 
 [dependencies]

@@ -397,6 +397,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7a1e2f27636f116493b8b860f5546edb47c8d8f8ea73e1d2a20be88e28d1fea"
 
 [[package]]
+name = "deep-forge-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "base64",
+ "dlc-capture",
+ "dlc-core",
+ "http-body-util",
+ "image",
+ "ndarray 0.16.1",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "der"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -438,28 +460,6 @@ dependencies = [
  "ort",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "dlc-server"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "base64",
- "dlc-capture",
- "dlc-core",
- "http-body-util",
- "image",
- "ndarray 0.16.1",
- "serde",
- "serde_json",
- "tokio",
- "tower",
- "tower-http",
- "tracing",
- "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]

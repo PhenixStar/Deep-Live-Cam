@@ -142,8 +142,8 @@ fn main() {
 }
 
 /// Find the server exe. Checks multiple candidate paths:
-/// 1. resource_dir/deep-live-cam-server.exe  (NSIS flat install)
-/// 2. resource_dir/binaries/deep-live-cam-server-{triple}.exe  (Tauri sidecar convention)
+/// 1. resource_dir/deep-forge-server.exe  (NSIS flat install)
+/// 2. resource_dir/binaries/deep-forge-server-{triple}.exe  (Tauri sidecar convention)
 /// 3. Same directory as the app exe
 fn resolve_server_exe(resource_dir: &std::path::Path) -> std::path::PathBuf {
     let triple = if cfg!(target_os = "windows") {
@@ -155,8 +155,8 @@ fn resolve_server_exe(resource_dir: &std::path::Path) -> std::path::PathBuf {
     };
 
     let candidates = [
-        resource_dir.join(format!("deep-live-cam-server{}", std::env::consts::EXE_SUFFIX)),
-        resource_dir.join(format!("binaries/deep-live-cam-server-{triple}{}", std::env::consts::EXE_SUFFIX)),
+        resource_dir.join(format!("deep-forge-server{}", std::env::consts::EXE_SUFFIX)),
+        resource_dir.join(format!("binaries/deep-forge-server-{triple}{}", std::env::consts::EXE_SUFFIX)),
     ];
 
     for path in &candidates {
@@ -168,7 +168,7 @@ fn resolve_server_exe(resource_dir: &std::path::Path) -> std::path::PathBuf {
     // Fallback: try next to the current exe
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            let next_to_exe = dir.join(format!("deep-live-cam-server{}", std::env::consts::EXE_SUFFIX));
+            let next_to_exe = dir.join(format!("deep-forge-server{}", std::env::consts::EXE_SUFFIX));
             if next_to_exe.exists() {
                 return next_to_exe;
             }

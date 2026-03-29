@@ -217,7 +217,7 @@ export default function App() {
   return (
     <div className="app">
       <header>
-        <h1>Deep Live Cam</h1>
+        <h1>Deep Forge</h1>
         <div className="header-right">
           <button
             className="btn-models"

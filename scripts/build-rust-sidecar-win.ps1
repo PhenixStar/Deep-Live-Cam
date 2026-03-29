@@ -1,5 +1,5 @@
 # Build the Rust server binary as a Tauri sidecar on Windows.
-# Produces: app/src-tauri/binaries/deep-live-cam-server-x86_64-pc-windows-msvc.exe
+# Produces: app/src-tauri/binaries/deep-forge-server-x86_64-pc-windows-msvc.exe
 $ErrorActionPreference = 'Stop'
 
 $RepoRoot = (Resolve-Path "$PSScriptRoot\..").Path
@@ -15,12 +15,12 @@ if (-not (Test-Path "$OrtLibsDir\onnxruntime.dll")) {
 Write-Host "[BUILD] Building Rust server for Windows x86_64..."
 Push-Location "$RepoRoot\core\rust-engine"
 $env:ORT_LIB_PATH = $OrtLibsDir
-cargo build --release -p dlc-server
+cargo build --release -p deep-forge-server
 Pop-Location
 
 Write-Host "[BUILD] Copying binary + DLLs to Tauri binaries..."
 New-Item -ItemType Directory -Force -Path $BinariesDir | Out-Null
-Copy-Item "$RepoRoot\core\rust-engine\target\release\dlc-server.exe" "$BinariesDir\deep-live-cam-server-x86_64-pc-windows-msvc.exe"
+Copy-Item "$RepoRoot\core\rust-engine\target\release\deep-forge-server.exe" "$BinariesDir\deep-forge-server-x86_64-pc-windows-msvc.exe"
 
 # Copy DirectML DLLs next to the binary (required at runtime)
 Copy-Item "$OrtLibsDir\*.dll" $BinariesDir -Force
