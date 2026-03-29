@@ -118,7 +118,7 @@ pub fn build_router(server_state: ServerState, remote: bool) -> Router {
             .allow_headers(Any)
     };
 
-    Router::new()
+    let mut router = Router::new()
         .route("/health",          get(health))
         .route("/source",          post(upload_source))
         .route("/swap/image",      post(swap_image))
@@ -130,8 +130,38 @@ pub fn build_router(server_state: ServerState, remote: bool) -> Router {
         .route("/ws/video",        get(ws_video))
         .route("/ws/metrics",      get(ws_metrics))
         .layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024))
-        .layer(cors)
-        .with_state(server_state)
+        .layer(cors);
+
+    // In remote mode, validate Bearer token on all requests except /health.
+    if remote {
+        if let Some(ref token) = server_state.api_token {
+            let expected = format!("Bearer {token}");
+            router = router.layer(axum::middleware::from_fn(
+                move |req: axum::http::Request<axum::body::Body>, next: axum::middleware::Next| {
+                    let expected = expected.clone();
+                    async move {
+                        // /health is always public (for liveness probes).
+                        if req.uri().path() == "/health" {
+                            return next.run(req).await;
+                        }
+                        let auth = req.headers()
+                            .get(axum::http::header::AUTHORIZATION)
+                            .and_then(|v| v.to_str().ok())
+                            .unwrap_or("");
+                        if auth == expected {
+                            next.run(req).await
+                        } else {
+                            (StatusCode::UNAUTHORIZED,
+                             Json(serde_json::json!({"error": "invalid or missing Bearer token"})))
+                                .into_response()
+                        }
+                    }
+                },
+            ));
+        }
+    }
+
+    router.with_state(server_state)
 }
 
 /// Build a `ServerState` with no models loaded (safe for unit/integration tests).

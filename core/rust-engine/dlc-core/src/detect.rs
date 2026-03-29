@@ -120,7 +120,7 @@ impl FaceDetector {
             // Debug: log score stats to diagnose detection failures.
             let max_score = scores_data.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
             let above_thresh = scores_data.iter().filter(|&&s| s >= threshold).count();
-            tracing::info!(
+            tracing::trace!(
                 level_idx, stride, num_props, max_score, above_thresh,
                 scores_len = scores_data.len(),
                 "SCRFD level score stats"
