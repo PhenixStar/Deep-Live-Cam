@@ -685,38 +685,44 @@ async fn handle_video_ws(mut socket: WebSocket, state: ServerState) {
 
     tracing::info!("[WS] video client connected");
 
-    // Use the shared camera from ServerState (opened at startup).
+    // Dedicated producer thread: reads camera, runs inference, sends JPEG via channel.
+    // This avoids spawn_blocking pool exhaustion and ensures sequential camera access.
+    let (frame_tx, mut frame_rx) = tokio::sync::mpsc::channel::<(Vec<u8>, FrameMetrics)>(2);
     let camera = state.camera.clone();
-    tracing::info!("[WS] entering frame loop (camera available: {})",
-        camera.lock().unwrap().is_some());
+    let st = state.clone();
 
-    let mut ticker = tokio::time::interval(tokio::time::Duration::from_millis(33));
+    let producer = std::thread::spawn(move || {
+        tracing::info!("[WS] producer thread started");
+        loop {
+            match produce_frame(&camera, &st) {
+                Some(frame_data) => {
+                    if frame_tx.blocking_send(frame_data).is_err() {
+                        break; // receiver dropped — WS disconnected
+                    }
+                }
+                None => {
+                    // Failed to produce frame — brief pause before retry
+                    std::thread::sleep(std::time::Duration::from_millis(33));
+                }
+            }
+        }
+        tracing::info!("[WS] producer thread exiting");
+    });
 
     loop {
         tokio::select! {
-            _ = ticker.tick() => {
-                let cam = camera.clone();
-                let st = state.clone();
-
-                // All blocking work (camera read + inference) runs off the async runtime.
-                let frame_result = tokio::task::spawn_blocking(move || {
-                    produce_frame(&cam, &st)
-                }).await;
-
-                let (jpeg, metrics) = match frame_result {
-                    Ok(Some(r)) => r,
-                    Ok(None) => continue, // encode error, skip frame
-                    Err(e) => { tracing::error!("[WS] task panic: {e}"); continue; }
-                };
-
-                if let Err(e) = socket.send(Message::Binary(jpeg.into())).await {
-                    tracing::info!("[WS] client disconnected: {e}");
-                    break;
-                }
-
-                // Broadcast metrics JSON (best-effort; ignore send errors when no subscribers).
-                if let Ok(json) = serde_json::to_string(&metrics) {
-                    let _ = state.metrics_tx.send(json);
+            frame = frame_rx.recv() => {
+                match frame {
+                    Some((jpeg, metrics)) => {
+                        if let Ok(json) = serde_json::to_string(&metrics) {
+                            let _ = state.metrics_tx.send(json);
+                        }
+                        if let Err(e) = socket.send(Message::Binary(jpeg.into())).await {
+                            tracing::info!("[WS] client disconnected: {e}");
+                            break;
+                        }
+                    }
+                    None => break, // producer exited
                 }
             }
 
@@ -733,6 +739,8 @@ async fn handle_video_ws(mut socket: WebSocket, state: ServerState) {
         }
     }
 
+    drop(frame_rx); // signal producer to stop
+    let _ = producer.join();
     tracing::info!("[WS] video handler exiting");
 }
 
