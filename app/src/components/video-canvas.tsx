@@ -82,7 +82,9 @@ export function VideoCanvas({
 
     ws.addEventListener("message", handleMessage);
     return () => ws.removeEventListener("message", handleMessage);
-  }, [wsRef, onFpsUpdate, drawOverlay]);
+    // Re-run when status changes so we attach after WS connects.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wsRef, status, onFpsUpdate, drawOverlay]);
 
   // Redraw overlay whenever faces or toggle changes without a new frame
   useEffect(() => {
