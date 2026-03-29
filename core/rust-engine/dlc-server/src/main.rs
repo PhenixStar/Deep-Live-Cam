@@ -105,6 +105,8 @@ async fn main() {
         bind_address: addr.to_string(),
         api_token,
         connected_clients: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+        #[cfg(feature = "opencv")]
+        recording_writer: Arc::new(std::sync::Mutex::new(None)),
     };
 
     let app = build_router(server_state, remote);

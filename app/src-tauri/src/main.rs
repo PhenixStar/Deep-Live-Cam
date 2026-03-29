@@ -76,6 +76,45 @@ async fn download_model(app: tauri::AppHandle, name: String, url: String, dest: 
 }
 
 #[tauri::command]
+async fn restart_sidecar(app: tauri::AppHandle, remote: bool) -> Result<(), String> {
+    // Kill existing sidecar process.
+    if let Some(state) = app.try_state::<SidecarChild>() {
+        if let Ok(mut guard) = state.0.lock() {
+            if let Some(mut child) = guard.take() {
+                let _ = child.kill();
+            }
+        }
+    }
+
+    // Brief pause to let the OS release the port.
+    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+    let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
+    let models_dir = resource_dir.join("models");
+    let server_exe = resolve_server_exe(&resource_dir);
+
+    let mut cmd = Command::new(&server_exe);
+    cmd.args(["--models-dir", &models_dir.to_string_lossy()]);
+    if remote {
+        cmd.arg("--remote");
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    let child = cmd.spawn().map_err(|e| format!("spawn: {e}"))?;
+
+    if let Some(state) = app.try_state::<SidecarChild>() {
+        *state.0.lock().unwrap() = Some(child);
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 fn get_system_metrics(state: tauri::State<MetricsState>) -> SystemMetrics {
     let mut sys = state.0.lock().unwrap();
     sys.refresh_cpu_usage();
@@ -91,7 +130,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![get_backend_url, get_system_metrics, get_models_dir, download_model])
+        .invoke_handler(tauri::generate_handler![get_backend_url, get_system_metrics, get_models_dir, download_model, restart_sidecar])
         .setup(|app| {
             app.manage(MetricsState(Mutex::new(System::new_all())));
 

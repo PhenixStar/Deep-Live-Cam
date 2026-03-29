@@ -597,8 +597,9 @@ main {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.server-mode-badge.remote { background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); }
-.server-mode-badge.local  { background: rgba(136,136,136,0.12); color: var(--muted); border: 1px solid var(--border); }
+.server-mode-badge.remote      { background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); }
+.server-mode-badge.local       { background: rgba(136,136,136,0.12); color: var(--muted); border: 1px solid var(--border); }
+.server-mode-badge.restarting  { background: rgba(245,158,11,0.12); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); }
 
 .server-mode-label { font-size: 11px; color: var(--muted); width: 36px; flex-shrink: 0; }
 .server-mode-value { font-size: 11px; font-family: monospace; color: var(--text); word-break: break-all; }
@@ -1104,3 +1105,77 @@ main {
   color: var(--text);
 }
 .btn.secondary:hover { opacity: 0.85; }
+
+/* ── Camera status badge ── */
+.camera-status-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.camera-status-badge.ready   { background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); }
+.camera-status-badge.opening { background: rgba(245,158,11,0.12); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); }
+
+/* ── Server mode toggle button ── */
+.btn-mode-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+.btn-mode-toggle:hover { color: var(--text); border-color: var(--text); }
+
+/* ── Recording section ── */
+.recording-section { display: flex; flex-direction: column; gap: 6px; }
+.recording-section > label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.btn-record {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 7px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.btn-record:hover { border-color: var(--danger); }
+.btn-record.active { border-color: var(--danger); color: var(--danger); }
+
+.record-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--danger);
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+.record-dot.active {
+  opacity: 1;
+  animation: record-blink 1s ease-in-out infinite;
+}
+@keyframes record-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}

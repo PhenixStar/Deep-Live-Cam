@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, type ChangeEvent } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { Status, Camera, Enhancers, Resolution, SwapCalibration, Profile, InputMode } from "../types";
 import { SourceSelector } from "./source-selector";
 
@@ -78,12 +79,66 @@ export function ControlsPanel({
   const [videoUploading, setVideoUploading] = useState(false);
   const videoFileRef = useRef<HTMLInputElement>(null);
 
+  // Camera status polling
+  const [cameraReady, setCameraReady] = useState(false);
+  const cameraPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Server mode toggle (restart sidecar)
+  const [restarting, setRestarting] = useState(false);
+
+  // Recording state
+  const [recording, setRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // Sync if parent updates cameras (initial load)
   useEffect(() => {
     if (initialCameras.length > 0) {
       setCameras(initialCameras);
     }
   }, [initialCameras]);
+
+  // Poll /camera/status every 2s until camera is ready
+  useEffect(() => {
+    if (cameraReady) return;
+    const poll = () => {
+      fetch(`${API_BASE}/camera/status`)
+        .then((res) => res.json())
+        .then((data: { available?: boolean }) => {
+          if (data.available) {
+            setCameraReady(true);
+            if (cameraPollingRef.current) {
+              clearInterval(cameraPollingRef.current);
+              cameraPollingRef.current = null;
+            }
+          }
+        })
+        .catch(() => {});
+    };
+    poll(); // immediate first check
+    cameraPollingRef.current = setInterval(poll, 2000);
+    return () => {
+      if (cameraPollingRef.current) clearInterval(cameraPollingRef.current);
+    };
+  }, [cameraReady]);
+
+  // Recording timer
+  useEffect(() => {
+    if (recording) {
+      setRecordingSeconds(0);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds((s) => s + 1);
+      }, 1000);
+    } else {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+    }
+    return () => {
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    };
+  }, [recording]);
 
   // Fetch server mode info from /health on mount
   useEffect(() => {
@@ -152,6 +207,56 @@ export function ControlsPanel({
     }
     setInputMode("camera");
     setVideoFilename(null);
+  };
+
+  const formatRecordingTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  };
+
+  const handleToggleRemote = async (enable: boolean) => {
+    setRestarting(true);
+    try {
+      await invoke("restart_sidecar", { remote: enable });
+      // Refresh server mode info after restart
+      setTimeout(() => {
+        fetch(`${API_BASE}/health`)
+          .then((res) => res.json())
+          .then((data: { remote_mode?: boolean; bind_address?: string }) => {
+            if (data.remote_mode !== undefined) {
+              setServerMode({
+                remote_mode: data.remote_mode,
+                bind_address: data.bind_address ?? "127.0.0.1:8008",
+              });
+            }
+          })
+          .catch(() => {})
+          .finally(() => setRestarting(false));
+      }, 3000);
+    } catch {
+      setRestarting(false);
+    }
+  };
+
+  const handleRecordingToggle = async () => {
+    if (recording) {
+      try {
+        await fetch(`${API_BASE}/recording/stop`, { method: "POST" });
+      } catch {
+        // Best-effort
+      }
+      setRecording(false);
+    } else {
+      try {
+        const res = await fetch(`${API_BASE}/recording/start`, { method: "POST" });
+        if (res.ok) {
+          setRecording(true);
+        }
+      } catch {
+        // Best-effort
+      }
+    }
   };
 
   const handleVideoFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -231,7 +336,14 @@ export function ControlsPanel({
 
       <div className="camera-select">
         <div className="camera-select-header">
-          <label>Camera</label>
+          <label>
+            Camera
+            {cameraReady ? (
+              <span className="camera-status-badge ready">Ready</span>
+            ) : (
+              <span className="camera-status-badge opening">Opening...</span>
+            )}
+          </label>
           <button
             className="btn-refresh"
             onClick={handleRefreshCameras}
@@ -327,13 +439,44 @@ export function ControlsPanel({
         )}
       </div>
 
+      <div className="recording-section">
+        <label>Recording</label>
+        <button
+          className={`btn-record ${recording ? "active" : ""}`}
+          onClick={handleRecordingToggle}
+        >
+          {recording ? (
+            <>
+              <span className="record-dot active" />
+              {`Recording... (${formatRecordingTime(recordingSeconds)})`}
+            </>
+          ) : (
+            <>
+              <span className="record-dot" />
+              Record
+            </>
+          )}
+        </button>
+      </div>
+
       {serverMode && (
         <div className="server-mode">
           <label>Server Mode</label>
-          {serverMode.remote_mode ? (
+          {restarting ? (
+            <div className="server-mode-info">
+              <span className="server-mode-badge restarting">Restarting...</span>
+            </div>
+          ) : serverMode.remote_mode ? (
             <div className="server-mode-info">
               <div className="server-mode-row">
                 <span className="server-mode-badge remote">Remote</span>
+                <button
+                  className="btn-mode-toggle"
+                  onClick={() => handleToggleRemote(false)}
+                  title="Switch to local mode"
+                >
+                  Disable
+                </button>
               </div>
               <div className="server-mode-row">
                 <span className="server-mode-label">Bind</span>
@@ -355,10 +498,14 @@ export function ControlsPanel({
             <div className="server-mode-info">
               <div className="server-mode-row">
                 <span className="server-mode-badge local">Local only</span>
+                <button
+                  className="btn-mode-toggle"
+                  onClick={() => handleToggleRemote(true)}
+                  title="Restart with --remote flag for LAN access"
+                >
+                  Enable Remote
+                </button>
               </div>
-              <p className="server-mode-hint">
-                Start with <code>--remote</code> flag to enable LAN access.
-              </p>
             </div>
           )}
         </div>

@@ -88,6 +88,10 @@ pub struct ServerState {
     pub api_token:      Option<String>,
     /// Number of currently connected WS video clients.
     pub connected_clients: Arc<std::sync::atomic::AtomicU32>,
+    /// OpenCV VideoWriter for recording (None when not recording).
+    /// Uses an Arc<Mutex<Option<...>>> so the producer thread can write frames.
+    #[cfg(feature = "opencv")]
+    pub recording_writer: Arc<Mutex<Option<opencv::videoio::VideoWriter>>>,
 }
 
 impl axum::extract::FromRef<ServerState> for Arc<RwLock<AppState>> {
@@ -141,9 +145,12 @@ pub fn build_router(server_state: ServerState, remote: bool) -> Router {
         .route("/profiles/{id}/photos",      post(crate::profiles::add_photo))
         .route("/profiles/{id}/photos/{idx}", delete(crate::profiles::delete_photo))
         .route("/profiles/{id}/activate",    post(crate::profiles::activate_profile))
-        .route("/input/video",   post(input_set_video))
-        .route("/input/camera",  post(input_set_camera))
-        .route("/input/status",  get(input_status))
+        .route("/input/video",      post(input_set_video))
+        .route("/input/camera",     post(input_set_camera))
+        .route("/input/status",     get(input_status))
+        .route("/camera/status",    get(camera_status))
+        .route("/recording/start",  post(recording_start))
+        .route("/recording/stop",   post(recording_stop))
         .layer(axum::extract::DefaultBodyLimit::max(100 * 1024 * 1024))
         .layer(cors);
 
@@ -197,6 +204,8 @@ pub fn test_state() -> ServerState {
         gpu_provider: "Auto".to_string(),
         remote_mode:  false,
         bind_address: "127.0.0.1:8008".to_string(),
+        #[cfg(feature = "opencv")]
+        recording_writer: Arc::new(Mutex::new(None)),
         api_token:    None,
         connected_clients: Arc::new(std::sync::atomic::AtomicU32::new(0)),
     }
@@ -560,6 +569,116 @@ async fn input_status(
                 "filename": filename
             }))
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GET /camera/status
+// ---------------------------------------------------------------------------
+
+async fn camera_status(State(server_state): State<ServerState>) -> impl IntoResponse {
+    let has_camera = server_state.camera.lock().unwrap().is_some();
+    Json(serde_json::json!({
+        "status": if has_camera { "ready" } else { "opening" },
+        "available": has_camera,
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// POST /recording/start  |  POST /recording/stop
+// ---------------------------------------------------------------------------
+
+async fn recording_start(State(server_state): State<ServerState>) -> impl IntoResponse {
+    #[cfg(feature = "opencv")]
+    {
+        use opencv::videoio::VideoWriter;
+
+        let mut app = server_state.app.write().unwrap();
+        if app.recording {
+            return (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({"error": "recording already active"})),
+            ).into_response();
+        }
+
+        // Build output path: recordings/<timestamp>.mp4 next to models_dir.
+        let out_dir = app.models_dir.parent().unwrap_or(&app.models_dir).join("recordings");
+        if let Err(e) = std::fs::create_dir_all(&out_dir) {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("create recordings dir: {e}")})),
+            ).into_response();
+        }
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let out_path = out_dir.join(format!("recording_{ts}.mp4"));
+
+        let (width, height) = app.resolution;
+        let fourcc = VideoWriter::fourcc('m' as i8, 'p' as i8, '4' as i8, 'v' as i8)
+            .unwrap_or(-1);
+        match VideoWriter::new(
+            &out_path.to_string_lossy(),
+            fourcc,
+            30.0,
+            opencv::core::Size::new(width as i32, height as i32),
+            true,
+        ) {
+            Ok(writer) => {
+                *server_state.recording_writer.lock().unwrap() = Some(writer);
+                app.recording = true;
+                app.recording_path = Some(out_path.clone());
+                Json(serde_json::json!({
+                    "status": "recording",
+                    "path": out_path.to_string_lossy(),
+                })).into_response()
+            }
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("VideoWriter::new failed: {e}")})),
+            ).into_response(),
+        }
+    }
+
+    #[cfg(not(feature = "opencv"))]
+    {
+        let _ = server_state;
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(serde_json::json!({"error": "recording requires the opencv feature"})),
+        ).into_response()
+    }
+}
+
+async fn recording_stop(State(server_state): State<ServerState>) -> impl IntoResponse {
+    #[cfg(feature = "opencv")]
+    {
+        let mut app = server_state.app.write().unwrap();
+        if !app.recording {
+            return (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({"error": "no active recording"})),
+            ).into_response();
+        }
+
+        // Drop the VideoWriter — this flushes + closes the file.
+        *server_state.recording_writer.lock().unwrap() = None;
+        app.recording = false;
+        let path = app.recording_path.clone();
+        Json(serde_json::json!({
+            "status": "stopped",
+            "path": path.as_ref().map(|p| p.to_string_lossy().into_owned()),
+        })).into_response()
+    }
+
+    #[cfg(not(feature = "opencv"))]
+    {
+        let _ = server_state;
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(serde_json::json!({"error": "recording requires the opencv feature"})),
+        ).into_response()
     }
 }
 
@@ -1220,6 +1339,31 @@ fn produce_frame(
 
     let mut metrics = metrics;
     metrics.total_ms = total_start.elapsed().as_secs_f64() * 1000.0;
+
+    // Write frame to VideoWriter if recording is active (opencv feature only).
+    #[cfg(feature = "opencv")]
+    {
+        let is_recording = state.app.read().unwrap().recording;
+        if is_recording {
+            if let Ok(mut writer_guard) = state.recording_writer.lock() {
+                if let Some(writer) = writer_guard.as_mut() {
+                    // Convert our ndarray BGR frame to an opencv Mat and write it.
+                    let (h, w, _) = output_frame.dim();
+                    let raw: Vec<u8> = output_frame.iter().cloned().collect();
+                    if let Ok(mat) = unsafe {
+                        opencv::core::Mat::new_rows_cols_with_data_unsafe(
+                            h as i32, w as i32,
+                            opencv::core::CV_8UC3,
+                            raw.as_ptr() as *mut std::ffi::c_void,
+                            opencv::core::Mat::AUTO_STEP,
+                        )
+                    } {
+                        let _ = writer.write(&mat);
+                    }
+                }
+            }
+        }
+    }
 
     let jpeg = encode_bgr_frame_to_jpeg(&output_frame).ok()?;
     Some((jpeg, metrics))

@@ -46,6 +46,10 @@ pub struct AppState {
     pub input_mode: InputMode,
     /// Path to the uploaded video file (set when input_mode == VideoFile).
     pub video_path: Option<std::path::PathBuf>,
+    /// Whether a recording session is currently active.
+    pub recording: bool,
+    /// Output path for the current (or last) recording.
+    pub recording_path: Option<std::path::PathBuf>,
 }
 
 impl Default for AppState {
@@ -73,6 +77,8 @@ impl Default for AppState {
             swap_scale: 1.0,
             input_mode: InputMode::Camera,
             video_path: None,
+            recording: false,
+            recording_path: None,
         }
     }
 }
