@@ -55,6 +55,20 @@ async fn main() {
         Err(e) => { tracing::warn!("GPEN-512 enhancer unavailable: {e:#}");  None   }
     };
 
+    // Open camera at startup on a blocking thread (can take 10-30s on Windows).
+    tracing::info!("[SERVER] Opening camera 0 (may take up to 30s on Windows)...");
+    let camera = {
+        let cam = std::thread::spawn(|| {
+            dlc_capture::CameraCapture::open(0).ok()
+        }).join().unwrap_or(None);
+        if cam.is_some() {
+            tracing::info!("[SERVER] Camera 0 opened successfully");
+        } else {
+            tracing::warn!("[SERVER] Camera 0 unavailable — test frames will be used");
+        }
+        cam
+    };
+
     // Broadcast channel for per-frame metrics (capacity: 64 frames).
     let (metrics_tx, _) = tokio::sync::broadcast::channel(64);
 
@@ -71,6 +85,7 @@ async fn main() {
 
     let server_state = ServerState {
         app:    Arc::new(RwLock::new(app_state)),
+        camera: Arc::new(std::sync::Mutex::new(camera)),
         models: Arc::new(Models {
             detector: std::sync::Mutex::new(detector),
             swapper:  std::sync::Mutex::new(swapper),

@@ -73,6 +73,7 @@ pub struct Models {
 pub struct ServerState {
     pub app:            Arc<RwLock<AppState>>,
     pub models:         Arc<Models>,
+    pub camera:         Arc<Mutex<Option<dlc_capture::CameraCapture>>>,
     pub metrics_tx:     tokio::sync::broadcast::Sender<String>,
     pub gpu_provider:   String,
     pub remote_mode:    bool,
@@ -135,6 +136,7 @@ pub fn test_state() -> ServerState {
     let (metrics_tx, _) = tokio::sync::broadcast::channel(64);
     ServerState {
         app:          Arc::new(RwLock::new(AppState::default())),
+        camera:       Arc::new(Mutex::new(None)),
         models:       Arc::new(Models {
             detector: Mutex::new(None),
             swapper:  Mutex::new(None),
@@ -683,28 +685,10 @@ async fn handle_video_ws(mut socket: WebSocket, state: ServerState) {
 
     tracing::info!("[WS] video client connected");
 
-    // Open camera on a blocking thread with timeout (OpenCV can hang on Windows).
-    let camera_index = { state.app.read().unwrap().active_camera };
-    let camera_future = tokio::task::spawn_blocking(move || {
-        tracing::info!("[WS] opening camera {camera_index}...");
-        let cam = dlc_capture::CameraCapture::open(camera_index).ok();
-        tracing::info!("[WS] camera open result: {}", if cam.is_some() { "OK" } else { "FAILED" });
-        cam
-    });
-    // Timeout camera open after 5 seconds to avoid hanging forever.
-    let camera = match tokio::time::timeout(
-        tokio::time::Duration::from_secs(15),
-        camera_future,
-    ).await {
-        Ok(Ok(cam)) => cam,
-        _ => {
-            tracing::warn!("[WS] Camera open timed out or failed — using test frames");
-            None
-        }
-    };
-
-    let camera = Arc::new(std::sync::Mutex::new(camera));
-    tracing::info!("[WS] entering frame loop");
+    // Use the shared camera from ServerState (opened at startup).
+    let camera = state.camera.clone();
+    tracing::info!("[WS] entering frame loop (camera available: {})",
+        camera.lock().unwrap().is_some());
 
     let mut ticker = tokio::time::interval(tokio::time::Duration::from_millis(33));
 
