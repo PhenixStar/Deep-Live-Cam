@@ -231,8 +231,32 @@ async fn models_status(
     State(server_state): State<ServerState>,
 ) -> impl IntoResponse {
     let app = server_state.app.read().unwrap();
-    let statuses = crate::model_manifest::check_models(&app.models_dir);
-    Json(serde_json::json!({"models": statuses}))
+    let mut statuses = crate::model_manifest::check_models(&app.models_dir);
+
+    // Cross-reference with actually loaded models (from Models struct).
+    let models = &server_state.models;
+    let loaded_map: std::collections::HashMap<&str, bool> = [
+        ("buffalo_l/buffalo_l/det_10g.onnx", models.detector.lock().map(|g| g.is_some()).unwrap_or(false)),
+        ("buffalo_l/buffalo_l/w600k_r50.onnx", models.swapper.lock().map(|g| g.is_some()).unwrap_or(false)),
+        ("inswapper_128.onnx", models.swapper.lock().map(|g| g.is_some()).unwrap_or(false)),
+        ("inswapper_128_fp16.onnx", models.swapper.lock().map(|g| g.is_some()).unwrap_or(false)),
+        ("gfpgan-1024.onnx", models.enhancer_gfpgan.lock().map(|g| g.is_some()).unwrap_or(false)),
+        ("GPEN-BFR-256.onnx", models.enhancer_gpen256.lock().map(|g| g.is_some()).unwrap_or(false)),
+        ("GPEN-BFR-512.onnx", models.enhancer_gpen512.lock().map(|g| g.is_some()).unwrap_or(false)),
+    ].into();
+
+    // Enrich statuses with `loaded` field.
+    let enriched: Vec<serde_json::Value> = statuses.iter().map(|s| {
+        let loaded = loaded_map.get(s.info.path).copied().unwrap_or(false);
+        let mut v = serde_json::to_value(s).unwrap_or_default();
+        v.as_object_mut().map(|o| o.insert("loaded".into(), loaded.into()));
+        v
+    }).collect();
+
+    Json(serde_json::json!({
+        "models": enriched,
+        "gpu_provider": server_state.gpu_provider,
+    }))
 }
 
 async fn reload_models(State(state): State<ServerState>) -> impl IntoResponse {

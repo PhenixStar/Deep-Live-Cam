@@ -73,9 +73,9 @@ async fn main() {
     // Broadcast channel for per-frame metrics (capacity: 64 frames).
     let (metrics_tx, _) = tokio::sync::broadcast::channel(64);
 
-    // Generate API token when running in remote mode.
+    // Generate or load persisted API token when running in remote mode.
     let api_token = if remote {
-        let token = generate_token();
+        let token = load_or_generate_token();
         tracing::info!("[SERVER] Remote mode enabled. API token: {}", token);
         Some(token)
     } else {
@@ -141,6 +141,42 @@ fn parse_remote_flag() -> bool {
 
 fn parse_npu_flag() -> bool {
     std::env::args().any(|a| a == "--npu")
+}
+
+/// Load persisted token from ~/.deep-forge/api-token, or generate + save a new one.
+fn load_or_generate_token() -> String {
+    let token_dir = dirs_or_fallback();
+    let token_path = token_dir.join("api-token");
+
+    // Try loading existing token.
+    if let Ok(token) = std::fs::read_to_string(&token_path) {
+        let token = token.trim().to_string();
+        if token.len() >= 16 {
+            tracing::info!("Loaded persisted API token from {}", token_path.display());
+            return token;
+        }
+    }
+
+    // Generate new token and persist it.
+    let token = generate_token();
+    let _ = std::fs::create_dir_all(&token_dir);
+    if let Err(e) = std::fs::write(&token_path, &token) {
+        tracing::warn!("Could not persist token to {}: {e}", token_path.display());
+    } else {
+        tracing::info!("New API token saved to {}", token_path.display());
+    }
+    token
+}
+
+/// Returns ~/.deep-forge/ (or a fallback if home dir is unavailable).
+fn dirs_or_fallback() -> std::path::PathBuf {
+    if let Some(home) = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+    {
+        std::path::PathBuf::from(home).join(".deep-forge")
+    } else {
+        std::path::PathBuf::from(".deep-forge")
+    }
 }
 
 fn generate_token() -> String {
