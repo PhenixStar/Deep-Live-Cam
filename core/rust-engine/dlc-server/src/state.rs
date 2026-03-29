@@ -14,6 +14,8 @@ pub struct AppState {
     pub source_face: Option<dlc_core::DetectedFace>,
     /// Directory where ONNX model files are stored.
     pub models_dir: std::path::PathBuf,
+    /// Directory where face profiles are stored (`models_dir/profiles/`).
+    pub profiles_dir: std::path::PathBuf,
     /// Capture resolution (width, height).
     pub resolution: (u32, u32),
     /// Swap calibration: horizontal offset in pixels (applied to paste-back).
@@ -30,6 +32,8 @@ impl Default for AppState {
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|_| std::path::PathBuf::from("models"));
 
+        let profiles_dir = models_dir.join("profiles");
+
         Self {
             active_camera: 0,
             face_enhancer_gfpgan: false,
@@ -38,6 +42,7 @@ impl Default for AppState {
             frame_processors: vec!["face_swapper".into()],
             source_image_bytes: None,
             source_face: None,
+            profiles_dir,
             models_dir,
             resolution: (640, 480),
             swap_offset_x: 0.0,

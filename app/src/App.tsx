@@ -6,6 +6,7 @@ import { ModelManager } from "./components/model-manager";
 import { useMetricsWs } from "./hooks/use-metrics-ws";
 import { useSystemMetrics } from "./hooks/use-system-metrics";
 import { useModels } from "./hooks/use-models";
+import { useProfiles } from "./hooks/use-profiles";
 import type { Status, Camera, Enhancers, SwapCalibration } from "./types";
 
 const API_BASE = "http://localhost:8008";
@@ -31,11 +32,14 @@ export default function App() {
     swap_offset_x: 0, swap_offset_y: 0, swap_scale: 1.0,
   });
 
+  const [showCatalog, setShowCatalog] = useState(false);
+
   const wsRef = useRef<WebSocket | null>(null);
 
   const inferenceMetrics = useMetricsWs(status === "processing");
   const systemMetrics = useSystemMetrics(2000);
   const { models } = useModels();
+  const { profiles, activeId: activeProfileId, activate: activateProfile, refresh: refreshProfiles } = useProfiles();
 
   const faces = inferenceMetrics?.faces ?? [];
   const missingRequired = models.filter((m) => m.required && !m.file_exists);
@@ -155,6 +159,28 @@ export default function App() {
     [],
   );
 
+  const handleProfileSelect = useCallback(
+    async (profileId: string) => {
+      await activateProfile(profileId);
+      // Sync source image thumbnail from the activated profile
+      const profile = profiles.find((p) => p.id === profileId);
+      if (profile?.thumbnail_b64) {
+        setSourceImage(`data:image/jpeg;base64,${profile.thumbnail_b64}`);
+        setSourceScore(profile.score > 0 ? profile.score : null);
+      } else {
+        setSourceImage(null);
+        setSourceScore(null);
+      }
+    },
+    [activateProfile, profiles],
+  );
+
+  const activeThumbnail = (() => {
+    const active = profiles.find((p) => p.id === activeProfileId);
+    if (active?.thumbnail_b64) return `data:image/jpeg;base64,${active.thumbnail_b64}`;
+    return sourceImage;
+  })();
+
   // Cleanup WS on unmount
   useEffect(() => {
     return () => {
@@ -227,6 +253,11 @@ export default function App() {
           onToggleDebug={() => setShowDebugOverlay((v) => !v)}
           calibration={calibration}
           onCalibrationChange={handleCalibrationChange}
+          profiles={profiles}
+          activeProfileId={activeProfileId}
+          activeThumbnail={activeThumbnail}
+          onProfileSelect={handleProfileSelect}
+          onProfileAddNew={() => { refreshProfiles(); setShowCatalog(true); }}
         />
         <VideoCanvas
           wsRef={wsRef}

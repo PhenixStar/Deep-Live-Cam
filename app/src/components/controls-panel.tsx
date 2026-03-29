@@ -1,5 +1,6 @@
 import { useState, useEffect, type ChangeEvent } from "react";
-import type { Status, Camera, Enhancers, Resolution, SwapCalibration } from "../types";
+import type { Status, Camera, Enhancers, Resolution, SwapCalibration, Profile } from "../types";
+import { SourceSelector } from "./source-selector";
 
 const API_BASE = "http://localhost:8008";
 
@@ -31,6 +32,12 @@ interface ControlsPanelProps {
   onToggleDebug: () => void;
   calibration: SwapCalibration;
   onCalibrationChange: (cal: Partial<SwapCalibration>) => void;
+  // Profile-based source selector
+  profiles: Profile[];
+  activeProfileId: string | null;
+  activeThumbnail: string | null;
+  onProfileSelect: (profileId: string) => void;
+  onProfileAddNew: () => void;
 }
 
 const ENHANCER_LABELS: { key: keyof Enhancers; label: string }[] = [
@@ -55,6 +62,11 @@ export function ControlsPanel({
   onToggleDebug,
   calibration,
   onCalibrationChange,
+  profiles,
+  activeProfileId,
+  activeThumbnail,
+  onProfileSelect,
+  onProfileAddNew,
 }: ControlsPanelProps) {
   const [cameras, setCameras] = useState<Camera[]>(initialCameras);
   const [refreshing, setRefreshing] = useState(false);
@@ -130,20 +142,26 @@ export function ControlsPanel({
 
   return (
     <section className="controls">
-      <div className="source-face">
-        <label>Source Face</label>
-        {sourceImage ? (
-          <img src={sourceImage} alt="source" className="face-preview" />
-        ) : (
-          <div className="placeholder">No face selected</div>
-        )}
-        {sourceScore !== null && (
-          <div className="source-score">
-            Detection: {(sourceScore * 100).toFixed(0)}%
-          </div>
-        )}
-        <input type="file" accept="image/*" onChange={onSourceUpload} />
-      </div>
+      <SourceSelector
+        profiles={profiles}
+        activeProfileId={activeProfileId}
+        onSelect={onProfileSelect}
+        onAddNew={onProfileAddNew}
+        thumbnail={activeThumbnail}
+      />
+      {/* Fallback file upload — hidden, used by profile editor */}
+      <input
+        id="source-upload-fallback"
+        type="file"
+        accept="image/*"
+        onChange={onSourceUpload}
+        style={{ display: "none" }}
+      />
+      {sourceScore !== null && (
+        <div className="source-score">
+          Detection: {(sourceScore * 100).toFixed(0)}%
+        </div>
+      )}
 
       <div className="camera-select">
         <div className="camera-select-header">

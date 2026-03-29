@@ -53,3 +53,12 @@ export interface Resolution {
   height: number;
   label: string;
 }
+
+export interface Profile {
+  id: string;
+  name: string;
+  description: string;
+  photo_count: number;
+  score: number;
+  thumbnail_b64: string | null;
+}

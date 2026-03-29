@@ -5,6 +5,7 @@
 
 pub mod state;
 pub mod router;
+pub mod profiles;
 
 /// Convenience re-export for tests: a `ServerState` with no models loaded.
 pub use router::test_state;

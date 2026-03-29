@@ -9,7 +9,7 @@ use axum::{
     extract::{Path, Json, State, ws::{WebSocket, WebSocketUpgrade}},
     http::{StatusCode, header},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, post, delete},
 };
 use serde::Deserialize;
 use std::sync::{Arc, Mutex, RwLock};
@@ -129,6 +129,11 @@ pub fn build_router(server_state: ServerState, remote: bool) -> Router {
         .route("/models/status",   get(models_status))
         .route("/ws/video",        get(ws_video))
         .route("/ws/metrics",      get(ws_metrics))
+        .route("/profiles",        get(crate::profiles::list_profiles).post(crate::profiles::create_profile))
+        .route("/profiles/{id}",   get(crate::profiles::get_profile).put(crate::profiles::update_profile).delete(crate::profiles::delete_profile))
+        .route("/profiles/{id}/photos",      post(crate::profiles::add_photo))
+        .route("/profiles/{id}/photos/{idx}", delete(crate::profiles::delete_photo))
+        .route("/profiles/{id}/activate",    post(crate::profiles::activate_profile))
         .layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024))
         .layer(cors);
 
