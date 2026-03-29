@@ -1,7 +1,7 @@
 ---
 title: "Source Face Profile Catalog"
 description: "Replace plain image upload with multi-photo face profiles and catalog management"
-status: planning
+status: complete
 priority: P1
 effort: 12h
 branch: main
