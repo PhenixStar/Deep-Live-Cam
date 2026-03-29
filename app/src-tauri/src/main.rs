@@ -106,9 +106,17 @@ fn main() {
             println!("[TAURI] server_exe: {}", server_exe.display());
             println!("[TAURI] models_dir: {}", models_dir.display());
 
-            let child = Command::new(&server_exe)
-                .args(["--models-dir", &models_dir.to_string_lossy()])
-                .spawn()
+            let mut cmd = Command::new(&server_exe);
+            cmd.args(["--models-dir", &models_dir.to_string_lossy()]);
+
+            // Hide the console window on Windows (no visible PowerShell/cmd).
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+            }
+
+            let child = cmd.spawn()
                 .unwrap_or_else(|e| {
                     panic!("failed to spawn sidecar at {}: {e}", server_exe.display());
                 });
