@@ -30,14 +30,21 @@ interface DownloadProgressEvent {
   total: number;
 }
 
+export type ReloadResult = Record<string, string>;
+
 export function useModels(): {
   models: ModelInfo[];
   downloading: Record<string, number>;
+  reloading: boolean;
+  reloadResult: ReloadResult | null;
   downloadModel: (model: ModelInfo) => void;
+  reloadModels: () => Promise<void>;
   refresh: () => void;
 } {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [downloading, setDownloading] = useState<Record<string, number>>({});
+  const [reloading, setReloading] = useState(false);
+  const [reloadResult, setReloadResult] = useState<ReloadResult | null>(null);
   const unlistenRef = useRef<UnlistenFn | null>(null);
 
   const fetchModels = useCallback(() => {
@@ -91,6 +98,8 @@ export function useModels(): {
           return next;
         });
         fetchModels();
+        // Auto-reload models into the server after a successful download.
+        fetch(`${API_BASE}/models/reload`, { method: "POST" }).catch(() => {});
       } catch {
         setDownloading((prev) => {
           const next = { ...prev };
@@ -102,5 +111,20 @@ export function useModels(): {
     [fetchModels],
   );
 
-  return { models, downloading, downloadModel, refresh: fetchModels };
+  const reloadModels = useCallback(async () => {
+    setReloading(true);
+    setReloadResult(null);
+    try {
+      const res = await fetch(`${API_BASE}/models/reload`, { method: "POST" });
+      const data: { status: string; models: ReloadResult } = await res.json();
+      setReloadResult(data.models);
+      fetchModels();
+    } catch {
+      setReloadResult({ error: "Request failed" });
+    } finally {
+      setReloading(false);
+    }
+  }, [fetchModels]);
+
+  return { models, downloading, reloading, reloadResult, downloadModel, reloadModels, refresh: fetchModels };
 }

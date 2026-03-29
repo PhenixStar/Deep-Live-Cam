@@ -15,8 +15,8 @@ use serde::Deserialize;
 use std::sync::{Arc, Mutex, RwLock};
 use tower_http::cors::{CorsLayer, Any};
 
-use crate::state::AppState;
-use dlc_core::{detect::FaceDetector, swap::FaceSwapper, Frame};
+use crate::state::{AppState, InputMode};
+use dlc_core::{detect::FaceDetector, swap::FaceSwapper, enhance::FaceEnhancer, GpuProvider, Frame};
 
 // ---------------------------------------------------------------------------
 // Metrics types
@@ -66,6 +66,10 @@ pub struct Models {
     pub enhancer_gfpgan:  Mutex<Option<dlc_core::enhance::FaceEnhancer>>,
     pub enhancer_gpen256: Mutex<Option<dlc_core::enhance::FaceEnhancer>>,
     pub enhancer_gpen512: Mutex<Option<dlc_core::enhance::FaceEnhancer>>,
+    /// Global DirectML inference lock. AMD GPUs crash when multiple DML
+    /// sessions run concurrently (upstream hacksider/Deep-Live-Cam PR #1710).
+    /// All inference calls must hold this lock to serialize GPU access.
+    pub dml_lock: Mutex<()>,
 }
 
 // ---------------------------------------------------------------------------
@@ -127,6 +131,7 @@ pub fn build_router(server_state: ServerState, remote: bool) -> Router {
         .route("/camera/{index}",  post(set_camera))
         .route("/settings",        get(get_settings).post(update_settings))
         .route("/models/status",   get(models_status))
+        .route("/models/reload",   post(reload_models))
         .route("/ws/video",        get(ws_video))
         .route("/ws/metrics",      get(ws_metrics))
         .route("/profiles",        get(crate::profiles::list_profiles).post(crate::profiles::create_profile))
@@ -134,7 +139,10 @@ pub fn build_router(server_state: ServerState, remote: bool) -> Router {
         .route("/profiles/{id}/photos",      post(crate::profiles::add_photo))
         .route("/profiles/{id}/photos/{idx}", delete(crate::profiles::delete_photo))
         .route("/profiles/{id}/activate",    post(crate::profiles::activate_profile))
-        .layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024))
+        .route("/input/video",   post(input_set_video))
+        .route("/input/camera",  post(input_set_camera))
+        .route("/input/status",  get(input_status))
+        .layer(axum::extract::DefaultBodyLimit::max(100 * 1024 * 1024))
         .layer(cors);
 
     // In remote mode, validate Bearer token on all requests except /health.
@@ -181,6 +189,7 @@ pub fn test_state() -> ServerState {
             enhancer_gfpgan:  Mutex::new(None),
             enhancer_gpen256: Mutex::new(None),
             enhancer_gpen512: Mutex::new(None),
+            dml_lock: Mutex::new(()),
         }),
         metrics_tx,
         gpu_provider: "Auto".to_string(),
@@ -253,6 +262,74 @@ async fn models_status(
     Json(serde_json::json!({"models": models}))
 }
 
+async fn reload_models(State(state): State<ServerState>) -> impl IntoResponse {
+    let models_dir = state.app.read().unwrap().models_dir.clone();
+    let provider = GpuProvider::Auto;
+    let mut results = serde_json::Map::new();
+
+    // Detector
+    let det_path = models_dir.join("buffalo_l/buffalo_l/det_10g.onnx");
+    match FaceDetector::new(&det_path, &provider) {
+        Ok(d) => {
+            *state.models.detector.lock().unwrap() = Some(d);
+            results.insert("detector".into(), serde_json::Value::String("loaded".into()));
+        }
+        Err(e) => {
+            results.insert("detector".into(), serde_json::Value::String(format!("failed: {e}")));
+        }
+    }
+
+    // Swapper
+    match dlc_core::swap::FaceSwapper::new(&models_dir, &provider) {
+        Ok(s) => {
+            *state.models.swapper.lock().unwrap() = Some(s);
+            results.insert("swapper".into(), serde_json::Value::String("loaded".into()));
+        }
+        Err(e) => {
+            results.insert("swapper".into(), serde_json::Value::String(format!("failed: {e}")));
+        }
+    }
+
+    // GFPGAN enhancer
+    let gfpgan_path = models_dir.join("gfpgan-1024.onnx");
+    match FaceEnhancer::new(&gfpgan_path, 1024, &provider) {
+        Ok(e) => {
+            *state.models.enhancer_gfpgan.lock().unwrap() = Some(e);
+            results.insert("gfpgan".into(), serde_json::Value::String("loaded".into()));
+        }
+        Err(e) => {
+            results.insert("gfpgan".into(), serde_json::Value::String(format!("failed: {e}")));
+        }
+    }
+
+    // GPEN-256 enhancer
+    let gpen256_path = models_dir.join("GPEN-BFR-256.onnx");
+    match FaceEnhancer::new(&gpen256_path, 256, &provider) {
+        Ok(e) => {
+            *state.models.enhancer_gpen256.lock().unwrap() = Some(e);
+            results.insert("gpen256".into(), serde_json::Value::String("loaded".into()));
+        }
+        Err(e) => {
+            results.insert("gpen256".into(), serde_json::Value::String(format!("failed: {e}")));
+        }
+    }
+
+    // GPEN-512 enhancer
+    let gpen512_path = models_dir.join("GPEN-BFR-512.onnx");
+    match FaceEnhancer::new(&gpen512_path, 512, &provider) {
+        Ok(e) => {
+            *state.models.enhancer_gpen512.lock().unwrap() = Some(e);
+            results.insert("gpen512".into(), serde_json::Value::String("loaded".into()));
+        }
+        Err(e) => {
+            results.insert("gpen512".into(), serde_json::Value::String(format!("failed: {e}")));
+        }
+    }
+
+    tracing::info!("[RELOAD] Models reloaded: {:?}", results);
+    Json(serde_json::json!({"status": "ok", "models": results}))
+}
+
 async fn upload_source(
     State(state): State<Arc<RwLock<AppState>>>,
     mut multipart: axum::extract::Multipart,
@@ -302,6 +379,136 @@ async fn upload_source(
     s.source_face = None;
 
     Json(serde_json::json!({"status": "ok", "bytes": bytes.len()})).into_response()
+}
+
+// ---------------------------------------------------------------------------
+// Input mode endpoints — POST /input/video, POST /input/camera, GET /input/status
+// ---------------------------------------------------------------------------
+
+/// POST /input/video
+/// Accepts a multipart upload of a video file (.mp4/.avi/.webm).
+/// Saves to a temp file and sets input_mode = VideoFile.
+/// Live-stream face swap from a video file requires opencv (not compiled in);
+/// the WS producer will return a 501 placeholder frame for VideoFile mode.
+async fn input_set_video(
+    State(state): State<Arc<RwLock<AppState>>>,
+    mut multipart: axum::extract::Multipart,
+) -> impl IntoResponse {
+    let field = match multipart.next_field().await {
+        Ok(Some(f)) => f,
+        Ok(None) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "no file field in multipart body"})),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("multipart error: {e}")})),
+            )
+                .into_response();
+        }
+    };
+
+    // Capture original filename before consuming field.
+    let original_name = field
+        .file_name()
+        .unwrap_or("video")
+        .to_string();
+
+    let bytes = match field.bytes().await {
+        Ok(b) => b,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("failed to read field bytes: {e}")})),
+            )
+                .into_response();
+        }
+    };
+
+    if bytes.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "empty file"})),
+        )
+            .into_response();
+    }
+
+    // Determine extension from original filename; default to .mp4.
+    let ext = std::path::Path::new(&original_name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("mp4");
+
+    // Write to a temp file in the system temp dir.
+    let tmp_path = std::env::temp_dir().join(format!("deep_forge_input.{ext}"));
+    if let Err(e) = std::fs::write(&tmp_path, &bytes) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("failed to save video: {e}")})),
+        )
+            .into_response();
+    }
+
+    tracing::info!(
+        "video input uploaded: {} ({} bytes) → {:?}",
+        original_name, bytes.len(), tmp_path
+    );
+
+    {
+        let mut s = state.write().unwrap();
+        s.input_mode = InputMode::VideoFile;
+        s.video_path = Some(tmp_path.clone());
+    }
+
+    Json(serde_json::json!({
+        "status": "ok",
+        "filename": original_name,
+        "bytes": bytes.len(),
+        "note": "Live WS streaming from video requires the opencv feature; frames will show a placeholder until supported."
+    }))
+    .into_response()
+}
+
+/// POST /input/camera
+/// Switches back to camera input mode.
+async fn input_set_camera(
+    State(state): State<Arc<RwLock<AppState>>>,
+) -> impl IntoResponse {
+    {
+        let mut s = state.write().unwrap();
+        s.input_mode = InputMode::Camera;
+        s.video_path = None;
+    }
+    Json(serde_json::json!({"status": "ok", "input_mode": "camera"}))
+}
+
+/// GET /input/status
+/// Returns the current input mode and, if VideoFile, the filename.
+async fn input_status(
+    State(state): State<Arc<RwLock<AppState>>>,
+) -> impl IntoResponse {
+    let s = state.read().unwrap();
+    match s.input_mode {
+        InputMode::Camera => Json(serde_json::json!({
+            "input_mode": "camera"
+        })),
+        InputMode::VideoFile => {
+            let filename = s
+                .video_path
+                .as_ref()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown");
+            Json(serde_json::json!({
+                "input_mode": "video_file",
+                "filename": filename
+            }))
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -707,6 +914,24 @@ async fn handle_metrics_ws(
     tracing::info!("[WS] metrics handler exiting");
 }
 
+/// Pre-allocated placeholder frame (640x480 dark teal) shown when VideoFile mode is active
+/// but live opencv decoding is not compiled in.
+fn generate_video_placeholder_frame() -> &'static [u8] {
+    use std::sync::OnceLock;
+    static FRAME: OnceLock<Vec<u8>> = OnceLock::new();
+    FRAME.get_or_init(|| {
+        const W: usize = 640;
+        const H: usize = 480;
+        let mut pixels = vec![0u8; W * H * 3];
+        for chunk in pixels.chunks_exact_mut(3) {
+            chunk[0] = 0;   // R
+            chunk[1] = 100; // G
+            chunk[2] = 120; // B  — dark teal to distinguish from camera fallback
+        }
+        pixels
+    })
+}
+
 /// Pre-allocated test frame (640x480 solid blue). Fallback when camera is unavailable.
 fn generate_test_frame() -> &'static [u8] {
     use std::sync::OnceLock;
@@ -813,6 +1038,24 @@ fn produce_frame(
     state: &ServerState,
 ) -> Option<(Vec<u8>, FrameMetrics)> {
     let total_start = std::time::Instant::now();
+
+    // If input_mode == VideoFile, live streaming is not yet supported (requires
+    // opencv).  Return a static placeholder frame so the WS connection stays
+    // alive and the UI can display the "video file loaded" state.
+    {
+        let app = state.app.read().unwrap();
+        if app.input_mode == InputMode::VideoFile {
+            let rgb = generate_video_placeholder_frame();
+            let jpeg = encode_jpeg(640, 480, rgb).ok()?;
+            let metrics = FrameMetrics {
+                total_ms: total_start.elapsed().as_secs_f64() * 1000.0,
+                ..Default::default()
+            };
+            // Throttle to ~10 fps for the placeholder.
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            return Some((jpeg, metrics));
+        }
+    }
 
     // Grab camera frame or fall back to test frame.
     let bgr_frame = {

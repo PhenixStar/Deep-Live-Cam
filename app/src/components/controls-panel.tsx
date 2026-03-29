@@ -1,5 +1,5 @@
-import { useState, useEffect, type ChangeEvent } from "react";
-import type { Status, Camera, Enhancers, Resolution, SwapCalibration, Profile } from "../types";
+import { useState, useEffect, useRef, type ChangeEvent } from "react";
+import type { Status, Camera, Enhancers, Resolution, SwapCalibration, Profile, InputMode } from "../types";
 import { SourceSelector } from "./source-selector";
 
 const API_BASE = "http://localhost:8008";
@@ -73,6 +73,10 @@ export function ControlsPanel({
   const [resolution, setResolution] = useState<Resolution>(RESOLUTIONS[0]);
   const [serverMode, setServerMode] = useState<ServerModeInfo | null>(null);
   const [tokenCopied, setTokenCopied] = useState(false);
+  const [inputMode, setInputMode] = useState<InputMode>("camera");
+  const [videoFilename, setVideoFilename] = useState<string | null>(null);
+  const [videoUploading, setVideoUploading] = useState(false);
+  const videoFileRef = useRef<HTMLInputElement>(null);
 
   // Sync if parent updates cameras (initial load)
   useEffect(() => {
@@ -140,6 +144,37 @@ export function ControlsPanel({
     }
   };
 
+  const handleSwitchToCamera = async () => {
+    try {
+      await fetch(`${API_BASE}/input/camera`, { method: "POST" });
+    } catch {
+      // Best-effort
+    }
+    setInputMode("camera");
+    setVideoFilename(null);
+  };
+
+  const handleVideoFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setVideoUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch(`${API_BASE}/input/video`, { method: "POST", body: form });
+      if (res.ok) {
+        setInputMode("video_file");
+        setVideoFilename(file.name);
+      }
+    } catch {
+      // Upload failed — stay in camera mode
+    } finally {
+      setVideoUploading(false);
+      // Reset so the same file can be re-selected
+      if (videoFileRef.current) videoFileRef.current.value = "";
+    }
+  };
+
   return (
     <section className="controls">
       <SourceSelector
@@ -163,6 +198,37 @@ export function ControlsPanel({
         </div>
       )}
 
+      <div className="input-source">
+        <label>Input Source</label>
+        <div className="input-source-toggle">
+          <button
+            className={`btn-toggle ${inputMode === "camera" ? "active" : ""}`}
+            onClick={handleSwitchToCamera}
+          >
+            Camera
+          </button>
+          <button
+            className={`btn-toggle ${inputMode === "video_file" ? "active" : ""}`}
+            onClick={() => videoFileRef.current?.click()}
+            disabled={videoUploading}
+          >
+            {videoUploading ? "Uploading..." : "Video File"}
+          </button>
+        </div>
+        <input
+          ref={videoFileRef}
+          type="file"
+          accept=".mp4,.avi,.webm,.mov"
+          onChange={handleVideoFileChange}
+          style={{ display: "none" }}
+        />
+        {inputMode === "video_file" && videoFilename && (
+          <div className="video-filename" title={videoFilename}>
+            {videoFilename}
+          </div>
+        )}
+      </div>
+
       <div className="camera-select">
         <div className="camera-select-header">
           <label>Camera</label>
@@ -175,7 +241,7 @@ export function ControlsPanel({
             {refreshing ? "..." : "Refresh"}
           </button>
         </div>
-        <select value={selectedCamera} onChange={onCameraChange}>
+        <select value={selectedCamera} onChange={onCameraChange} disabled={inputMode === "video_file"}>
           {cameras.map((c) => (
             <option key={c.index} value={c.index}>
               {c.name}

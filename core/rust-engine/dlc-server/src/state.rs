@@ -1,5 +1,18 @@
 //! Shared application state for the server.
 
+/// Whether the live-stream source is a camera or an uploaded video file.
+#[derive(Debug, Clone, PartialEq)]
+pub enum InputMode {
+    Camera,
+    VideoFile,
+}
+
+impl Default for InputMode {
+    fn default() -> Self {
+        InputMode::Camera
+    }
+}
+
 /// Server-wide mutable state protected by RwLock.
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -24,6 +37,10 @@ pub struct AppState {
     pub swap_offset_y: f32,
     /// Swap calibration: scale multiplier (1.0 = default, >1 = larger face).
     pub swap_scale: f32,
+    /// Whether live stream reads from camera or a video file.
+    pub input_mode: InputMode,
+    /// Path to the uploaded video file (set when input_mode == VideoFile).
+    pub video_path: Option<std::path::PathBuf>,
 }
 
 impl Default for AppState {
@@ -48,6 +65,8 @@ impl Default for AppState {
             swap_offset_x: 0.0,
             swap_offset_y: 0.0,
             swap_scale: 1.0,
+            input_mode: InputMode::Camera,
+            video_path: None,
         }
     }
 }

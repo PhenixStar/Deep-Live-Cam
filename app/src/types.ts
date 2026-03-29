@@ -62,3 +62,10 @@ export interface Profile {
   score: number;
   thumbnail_b64: string | null;
 }
+
+export type InputMode = "camera" | "video_file";
+
+export interface InputStatus {
+  input_mode: InputMode;
+  filename?: string;
+}

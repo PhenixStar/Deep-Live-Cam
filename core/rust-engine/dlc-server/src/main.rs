@@ -11,6 +11,11 @@ use std::sync::{Arc, RwLock};
 async fn main() {
     tracing_subscriber::fmt::init();
 
+    // Limit OpenMP threads for DirectML stability on AMD GPUs (upstream PR #1710).
+    if std::env::var("OMP_NUM_THREADS").is_err() {
+        std::env::set_var("OMP_NUM_THREADS", "6");
+    }
+
     let models_dir = parse_models_dir_arg();
     let remote = parse_remote_flag();
 
@@ -82,6 +87,7 @@ async fn main() {
             enhancer_gfpgan:  std::sync::Mutex::new(enhancer_gfpgan),
             enhancer_gpen256: std::sync::Mutex::new(enhancer_gpen256),
             enhancer_gpen512: std::sync::Mutex::new(enhancer_gpen512),
+            dml_lock: std::sync::Mutex::new(()),
         }),
         metrics_tx,
         gpu_provider: gpu_provider_name,

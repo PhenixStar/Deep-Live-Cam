@@ -1,5 +1,5 @@
 import type { ModelInfo } from "../types";
-import { useModels, hasDownloadUrl } from "../hooks/use-models";
+import { useModels, hasDownloadUrl, type ReloadResult } from "../hooks/use-models";
 
 interface ModelManagerProps {
   onClose: () => void;
@@ -17,8 +17,14 @@ function statusClass(model: ModelInfo, downloadPct: number | undefined): string 
   return "model-status missing";
 }
 
+function reloadResultLabel(result: ReloadResult): string {
+  const loaded = Object.values(result).filter((v) => v === "loaded").length;
+  const total = Object.keys(result).length;
+  return `${loaded}/${total} models loaded`;
+}
+
 export function ModelManager({ onClose }: ModelManagerProps) {
-  const { models, downloading, downloadModel, refresh } = useModels();
+  const { models, downloading, reloading, reloadResult, downloadModel, reloadModels, refresh } = useModels();
 
   const missingRequired = models.filter((m) => m.required && !m.file_exists);
 
@@ -98,6 +104,18 @@ export function ModelManager({ onClose }: ModelManagerProps) {
           <button className="btn primary" onClick={refresh}>
             Refresh
           </button>
+          <button
+            className="btn primary"
+            onClick={reloadModels}
+            disabled={reloading}
+          >
+            {reloading ? "Reloading..." : "Reload Models"}
+          </button>
+          {reloadResult && (
+            <span className="mm-reload-result">
+              {reloadResultLabel(reloadResult)}
+            </span>
+          )}
         </div>
       </div>
     </div>
