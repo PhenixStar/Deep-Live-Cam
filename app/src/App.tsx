@@ -63,13 +63,13 @@ export default function App() {
     const ws = new WebSocket("ws://localhost:8008/ws/video");
     wsRef.current = ws;
     ws.binaryType = "arraybuffer";
-    ws.onopen = () => setStatus("connected");
-    ws.onmessage = () => setStatus("processing");
-    ws.onerror = () => setError("Connection failed — is the backend running?");
-    ws.onclose = () => {
+    ws.addEventListener("open", () => setStatus("connected"));
+    ws.addEventListener("message", () => setStatus("processing"));
+    ws.addEventListener("error", () => setError("Connection failed — is the backend running?"));
+    ws.addEventListener("close", () => {
       setStatus("disconnected");
       wsRef.current = null;
-    };
+    });
   }, []);
 
   const disconnect = useCallback(() => {

@@ -29,7 +29,10 @@ fn get_models_dir(app: tauri::AppHandle) -> Result<String, String> {
     let resource_dir = app.path().resource_dir()
         .map_err(|e| format!("resource_dir: {e}"))?;
     let models_dir = resource_dir.join("models");
-    Ok(models_dir.to_string_lossy().into_owned())
+    // Strip \\?\ prefix that Windows extended path APIs add — it breaks some file operations.
+    let path_str = models_dir.to_string_lossy().into_owned();
+    let clean = path_str.strip_prefix(r"\\?\").unwrap_or(&path_str).to_string();
+    Ok(clean)
 }
 
 #[tauri::command]
@@ -37,28 +40,38 @@ async fn download_model(app: tauri::AppHandle, name: String, url: String, dest: 
     use futures_util::StreamExt;
     use tokio::io::AsyncWriteExt;
 
+    println!("[DOWNLOAD] name={name} url={url} dest={dest}");
+
+    // Strip \\?\ prefix if present
+    let dest = dest.strip_prefix(r"\\?\").unwrap_or(&dest).to_string();
+
     // Create parent directories if needed (e.g., buffalo_l/buffalo_l/)
     let dest_path = std::path::Path::new(&dest);
     if let Some(parent) = dest_path.parent() {
         tokio::fs::create_dir_all(parent).await
-            .map_err(|e| format!("create dirs: {e}"))?;
+            .map_err(|e| format!("create dirs {}: {e}", parent.display()))?;
     }
 
-    let response = reqwest::get(&url).await.map_err(|e| e.to_string())?;
+    let response = reqwest::get(&url).await
+        .map_err(|e| format!("HTTP request failed: {e}"))?;
     let total = response.content_length().unwrap_or(0);
+    println!("[DOWNLOAD] {name}: {total} bytes expected");
+
     let mut downloaded: u64 = 0;
-    let mut file = tokio::fs::File::create(&dest).await.map_err(|e| e.to_string())?;
+    let mut file = tokio::fs::File::create(&dest).await
+        .map_err(|e| format!("create file {dest}: {e}"))?;
     let mut stream = response.bytes_stream();
 
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| e.to_string())?;
-        file.write_all(&chunk).await.map_err(|e| e.to_string())?;
+        let chunk = chunk.map_err(|e| format!("stream read: {e}"))?;
+        file.write_all(&chunk).await.map_err(|e| format!("file write: {e}"))?;
         downloaded += chunk.len() as u64;
         let _ = app.emit("model_download_progress", serde_json::json!({
             "name": name, "downloaded": downloaded, "total": total
         }));
     }
 
+    println!("[DOWNLOAD] {name}: complete ({downloaded} bytes)");
     Ok(())
 }
 
