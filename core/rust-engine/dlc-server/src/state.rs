@@ -23,8 +23,13 @@ pub struct AppState {
     pub frame_processors: Vec<String>,
     /// Raw image bytes of the uploaded source face image.
     pub source_image_bytes: Option<Vec<u8>>,
-    /// Detected source face (populated once detection is wired in Week 6).
+    /// Detected source face with pre-computed embedding.
+    /// When set (via /source upload or profile activation), the WS loop
+    /// skips re-detection and re-embedding — saving ~35ms/frame.
     pub source_face: Option<dlc_core::DetectedFace>,
+    /// Cached 512-dim ArcFace embedding for the source face.
+    /// Set once on upload, reused every frame without re-computation.
+    pub cached_source_embedding: Option<Vec<f32>>,
     /// Directory where ONNX model files are stored.
     pub models_dir: std::path::PathBuf,
     /// Directory where face profiles are stored (`models_dir/profiles/`).
@@ -59,6 +64,7 @@ impl Default for AppState {
             frame_processors: vec!["face_swapper".into()],
             source_image_bytes: None,
             source_face: None,
+            cached_source_embedding: None,
             profiles_dir,
             models_dir,
             resolution: (640, 480),

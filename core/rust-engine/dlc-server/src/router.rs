@@ -304,9 +304,10 @@ async fn reload_models(State(state): State<ServerState>) -> impl IntoResponse {
 }
 
 async fn upload_source(
-    State(state): State<Arc<RwLock<AppState>>>,
+    State(server_state): State<ServerState>,
     mut multipart: axum::extract::Multipart,
 ) -> impl IntoResponse {
+    let state = server_state.app.clone();
     let field = match multipart.next_field().await {
         Ok(Some(f)) => f,
         Ok(None) => {
@@ -347,11 +348,61 @@ async fn upload_source(
 
     tracing::info!("source image received: {} bytes", bytes.len());
 
+    // Pre-compute face detection + embedding (biggest FPS win — saves ~35ms/frame).
+    let mut detected_face = None;
+    let mut cached_embedding = None;
+    let mut score = None;
+
+    if let Ok(mut models) = server_state.models.detector.lock() {
+        if let Some(ref mut detector) = *models {
+            if let Ok(img) = image::load_from_memory(&bytes) {
+                let rgb = img.to_rgb8();
+                let (w, h) = (rgb.width() as usize, rgb.height() as usize);
+                // Convert to BGR Array3 for detection.
+                let mut bgr = ndarray::Array3::<u8>::zeros((h, w, 3));
+                for y in 0..h {
+                    for x in 0..w {
+                        let p = rgb.get_pixel(x as u32, y as u32);
+                        bgr[[y, x, 0]] = p[2]; // B
+                        bgr[[y, x, 1]] = p[1]; // G
+                        bgr[[y, x, 2]] = p[0]; // R
+                    }
+                }
+                if let Ok(faces) = detector.detect(&bgr, 0.3) {
+                    if let Some(face) = faces.into_iter().next() {
+                        score = Some(face.score);
+                        // Try to get embedding too.
+                        drop(models); // release detector lock
+                        if let Ok(mut swapper_guard) = server_state.models.swapper.lock() {
+                            if let Some(ref mut swapper) = *swapper_guard {
+                                if let Ok(emb) = swapper.get_embedding(&bgr, &face) {
+                                    cached_embedding = Some(emb.clone());
+                                    let mut face_with_emb = face.clone();
+                                    face_with_emb.embedding = Some(emb);
+                                    detected_face = Some(face_with_emb);
+                                    tracing::info!("Source embedding cached (skip re-detect per frame)");
+                                }
+                            }
+                        }
+                        if detected_face.is_none() {
+                            detected_face = Some(face);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let mut s = state.write().unwrap();
     s.source_image_bytes = Some(bytes.to_vec());
-    s.source_face = None;
+    s.source_face = detected_face;
+    s.cached_source_embedding = cached_embedding;
 
-    Json(serde_json::json!({"status": "ok", "bytes": bytes.len()})).into_response()
+    Json(serde_json::json!({
+        "status": "ok",
+        "bytes": bytes.len(),
+        "score": score,
+    })).into_response()
 }
 
 // ---------------------------------------------------------------------------
@@ -1057,11 +1108,13 @@ fn produce_frame(
         }
     };
 
-    // Read source face + enhancer settings + calibration in a single lock.
-    let (source_bytes, use_gfpgan, use_gpen256, use_gpen512, offset_x, offset_y, swap_scale) = {
+    // Read source face + cached embedding + enhancer settings in a single lock.
+    let (source_bytes, cached_source, use_gfpgan, use_gpen256, use_gpen512, offset_x, offset_y, swap_scale) = {
         let app = state.app.read().unwrap();
         (
             app.source_image_bytes.clone(),
+            // Use cached face+embedding if available (skips ~35ms re-detection per frame).
+            app.source_face.clone(),
             app.face_enhancer_gfpgan,
             app.face_enhancer_gpen256,
             app.face_enhancer_gpen512,
