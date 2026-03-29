@@ -35,7 +35,7 @@ async fn json_body(body: Body) -> Value {
 // ---------------------------------------------------------------------------
 
 fn app() -> axum::Router {
-    build_router(test_state())
+    build_router(test_state(), false)
 }
 
 // ---------------------------------------------------------------------------

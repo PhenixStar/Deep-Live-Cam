@@ -8,7 +8,10 @@ edition = "2021"
 license = "AGPL-3.0"
 
 [workspace.dependencies]
-ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "directml", "copy-dylibs"] }
+# ORT configuration:
+# - Windows: set ORT_LIB_PATH env var to ort-dml-libs/ (pre-downloaded DirectML DLLs)
+# - Linux/macOS: uses download-binaries to auto-fetch ONNX Runtime
+ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "download-binaries", "tls-native"] }
 ndarray = "0.16"
 image = "0.25"
 serde = { version = "1", features = ["derive"] }

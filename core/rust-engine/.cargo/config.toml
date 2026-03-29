@@ -1,2 +1,4 @@
-[env]
-ORT_LIB_PATH = { value = "ort-dml-libs", relative = true }
+# On Windows: set ORT_LIB_PATH to use pre-downloaded DirectML DLLs.
+# On Linux/macOS: ort downloads binaries automatically via the download-binaries feature.
+# Set this env var manually on Windows: $env:ORT_LIB_PATH = "ort-dml-libs"
+# Or run: pwsh scripts/setup-directml-dlls.ps1
