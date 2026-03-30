@@ -29,6 +29,27 @@ async fn main() {
     // Auto-detect best GPU/accelerator. Override with DEEP_FORGE_EP env var
     // or --npu / --cuda / --cpu CLI flags.
     let provider = if parse_npu_flag() {
+        // Auto-detect NPU firmware (xclbin) if XLNX_VART_FIRMWARE is not set.
+        // Prefer 4x4 (full power) over 1x4 (single column).
+        if std::env::var("XLNX_VART_FIRMWARE").is_err() {
+            let exe_dir = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+                .unwrap_or_default();
+            let candidates = [
+                exe_dir.join("xclbins/phoenix/4x4.xclbin"),
+                exe_dir.join("xclbins/phoenix/1x4.xclbin"),
+                app_state.models_dir.join("../xclbins/phoenix/4x4.xclbin"),
+                app_state.models_dir.join("../xclbins/phoenix/1x4.xclbin"),
+            ];
+            for path in &candidates {
+                if path.exists() {
+                    tracing::info!("[NPU] Auto-detected firmware: {}", path.display());
+                    std::env::set_var("XLNX_VART_FIRMWARE", path);
+                    break;
+                }
+            }
+        }
         GpuProvider::Npu {
             config_file: std::env::var("DEEP_FORGE_NPU_CONFIG")
                 .unwrap_or_else(|_| "vaip_config.json".into()),
