@@ -59,7 +59,16 @@ pub const MODELS: &[ModelInfo] = &[
         required: true,
         description: "ArcFace R50 face recognition/embedding model",
     },
-    // === Required: face swap ===
+    // === Required: face swap (one of these must exist) ===
+    ModelInfo {
+        name: "ReSwapper 256 (Quality)",
+        path: "reswapper_256.onnx",
+        url_suffix: "reswapper_256.onnx",
+        fallback_url: "",
+        size_mb: 554,
+        required: false,
+        description: "256x256 face swap — higher quality, skip enhancer. Auto-preferred when present.",
+    },
     ModelInfo {
         name: "Inswapper 128 (FP32)",
         path: "inswapper_128.onnx",
@@ -67,7 +76,7 @@ pub const MODELS: &[ModelInfo] = &[
         fallback_url: "https://huggingface.co/ezioruan/inswapper_128.onnx/resolve/main/inswapper_128.onnx",
         size_mb: 554,
         required: true,
-        description: "InsightFace inswapper face swap model (FP32)",
+        description: "InsightFace inswapper 128x128 face swap (FP32, fallback)",
     },
     ModelInfo {
         name: "Inswapper 128 (FP16)",

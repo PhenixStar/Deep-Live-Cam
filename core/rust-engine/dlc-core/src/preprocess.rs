@@ -89,13 +89,24 @@ const ARCFACE_DST: [[f32; 2]; 5] = [
 
 /// inswapper canonical 5-point template for 128x128 output.
 /// Scaled proportionally from the 112x112 ArcFace template (factor ≈ 128/112).
-const SWAP_DST: [[f32; 2]; 5] = [
+const SWAP_DST_128: [[f32; 2]; 5] = [
     [43.7644, 58.9670],
     [84.0364, 58.8588],
     [64.0288, 81.9847],
     [47.4849, 105.5606],
     [80.8341, 105.3761],
 ];
+
+/// Scale the 128x128 template to any target size.
+fn swap_dst_for_size(size: usize) -> [[f32; 2]; 5] {
+    let scale = size as f32 / 128.0;
+    let mut dst = SWAP_DST_128;
+    for pt in &mut dst {
+        pt[0] *= scale;
+        pt[1] *= scale;
+    }
+    dst
+}
 
 /// Compute the 2x3 similarity-transform matrix (scale + rotation + translation)
 /// that maps `src` landmark points to `dst` reference points (Umeyama method).
@@ -232,20 +243,23 @@ pub fn align_face_arcface(
         .context("align_face_arcface: warp_affine failed")
 }
 
-/// Align face using 5 landmarks for inswapper (128x128).
+/// Align face using 5 landmarks for swap model at `size` x `size`.
 pub fn align_face_swap(
     frame: &crate::Frame,
     landmarks: &[[f32; 2]; 5],
+    size: usize,
 ) -> Result<crate::Frame> {
-    let mat = similarity_transform(landmarks, &SWAP_DST);
-    warp_affine(frame, &mat, 128, 128)
+    let dst = swap_dst_for_size(size);
+    let mat = similarity_transform(landmarks, &dst);
+    warp_affine(frame, &mat, size, size)
         .context("align_face_swap: warp_affine failed")
 }
 
-/// Compute forward affine matrix from detected landmarks to the 128x128 swap
-/// template.  Exposed for use in `swap.rs` to inverse-warp results back.
-pub(crate) fn affine_matrix_swap(landmarks: &[[f32; 2]; 5]) -> [f32; 6] {
-    similarity_transform(landmarks, &SWAP_DST)
+/// Compute forward affine matrix from detected landmarks to the swap template
+/// at `size` x `size`. Exposed for use in `swap.rs` to inverse-warp results back.
+pub(crate) fn affine_matrix_swap(landmarks: &[[f32; 2]; 5], size: usize) -> [f32; 6] {
+    let dst = swap_dst_for_size(size);
+    similarity_transform(landmarks, &dst)
 }
 
 /// Invert a 2x3 similarity affine matrix `[a, -b, tx, b, a, ty]`.

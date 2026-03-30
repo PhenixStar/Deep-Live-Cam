@@ -17,10 +17,17 @@ use crate::preprocess::{align_face_arcface, align_face_swap, affine_matrix_swap,
 // FaceSwapper
 // ---------------------------------------------------------------------------
 
-/// Pre-loaded ONNX sessions for ArcFace embedding extraction and inswapper_128.
+/// Pre-loaded ONNX sessions for ArcFace embedding extraction and face swap.
+///
+/// Supports multiple swap models:
+/// - inswapper_128 (128x128, default, fastest)
+/// - reswapper_256 (256x256, higher quality, no enhancer needed)
+/// - hyperswap variants (256x256, best quality)
 pub struct FaceSwapper {
     arcface_session: Session,
     swap_session: Session,
+    /// Spatial resolution of the swap model (128 or 256).
+    pub swap_size: usize,
 }
 
 impl FaceSwapper {
@@ -29,19 +36,43 @@ impl FaceSwapper {
     /// Expected paths:
     /// - `<models_dir>/buffalo_l/buffalo_l/w600k_r50.onnx`  (ArcFace R50)
     /// - `<models_dir>/inswapper_128.onnx`                  (inswapper)
+    /// Load the default swap model (prefers reswapper_256, falls back to inswapper_128).
     pub fn new(models_dir: &Path, provider: &crate::GpuProvider) -> Result<Self> {
         let arcface_path = provider.resolve_model_path(&models_dir.join("buffalo_l/buffalo_l/w600k_r50.onnx"));
-        let swap_path = provider.resolve_model_path(&models_dir.join("inswapper_128.onnx"));
 
         tracing::info!("Loading ArcFace from {}", arcface_path.display());
         let arcface_session = provider.load_session(&arcface_path)
             .with_context(|| format!("ArcFace: failed to load {}", arcface_path.display()))?;
 
-        tracing::info!("Loading inswapper from {}", swap_path.display());
-        let swap_session = provider.load_session(&swap_path)
-            .with_context(|| format!("inswapper: failed to load {}", swap_path.display()))?;
+        // Try models in quality order: reswapper_256 > inswapper_128
+        let (swap_session, swap_size) = Self::load_best_swap_model(models_dir, provider)?;
 
-        Ok(Self { arcface_session, swap_session })
+        Ok(Self { arcface_session, swap_session, swap_size })
+    }
+
+    /// Try swap models in priority order. Returns (session, resolution).
+    fn load_best_swap_model(models_dir: &Path, provider: &crate::GpuProvider) -> Result<(Session, usize)> {
+        let candidates = [
+            ("reswapper_256.onnx", 256),
+            ("inswapper_128.onnx", 128),
+        ];
+
+        for (filename, size) in &candidates {
+            let path = provider.resolve_model_path(&models_dir.join(filename));
+            if path.exists() {
+                match provider.load_session(&path) {
+                    Ok(session) => {
+                        tracing::info!("Loaded swap model: {} ({}x{})", path.display(), size, size);
+                        return Ok((session, *size));
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to load {}: {e:#}", path.display());
+                    }
+                }
+            }
+        }
+
+        anyhow::bail!("No swap model found (tried reswapper_256, inswapper_128)")
     }
 
     /// Align `face` in `frame` and run ArcFace to produce a 512-dim L2-normalised
@@ -96,12 +127,14 @@ impl FaceSwapper {
         anyhow::ensure!(src_emb.len() == 512,
             "swap: source embedding has {} dims, expected 512", src_emb.len());
 
-        // 1. Align target face to 128x128.
-        let aligned_target = align_face_swap(frame, &target_face.landmarks)
+        let sz = self.swap_size;
+
+        // 1. Align target face to swap_size x swap_size.
+        let aligned_target = align_face_swap(frame, &target_face.landmarks, sz)
             .context("swap: target face alignment failed")?;
 
-        // 2. "target" input tensor [1,3,128,128], normalised 0-1, RGB.
-        let (tgt_shape, tgt_data) = bgr_hwc_to_rgb_nchw_01(&aligned_target, 128, 128)?;
+        // 2. "target" input tensor [1,3,sz,sz], normalised 0-1, RGB.
+        let (tgt_shape, tgt_data) = bgr_hwc_to_rgb_nchw_01(&aligned_target, sz, sz)?;
         let target_tensor = Tensor::<f32>::from_array((tgt_shape, tgt_data.into_boxed_slice()))
             .context("swap: failed to create target tensor")?;
 
@@ -111,27 +144,27 @@ impl FaceSwapper {
         let source_tensor = Tensor::<f32>::from_array((src_shape, src_data))
             .context("swap: failed to create source tensor")?;
 
-        // 4. Run inswapper with named inputs.
+        // 4. Run swap model with named inputs.
         let outputs = self.swap_session
             .run(ort::inputs! {
                 "target" => target_tensor,
                 "source" => source_tensor
             })
-            .context("swap: inswapper inference failed")?;
+            .context("swap: inference failed")?;
 
-        // 5. Extract output [1,3,128,128] f32.
+        // 5. Extract output [1,3,sz,sz] f32.
         let (_out_shape, out_raw) = outputs[0]
             .try_extract_tensor::<f32>()
-            .context("swap: failed to extract swapper output")?;
+            .context("swap: failed to extract output")?;
 
-        anyhow::ensure!(out_raw.len() == 3 * 128 * 128,
-            "swap: unexpected output size {}", out_raw.len());
+        anyhow::ensure!(out_raw.len() == 3 * sz * sz,
+            "swap: unexpected output size {} (expected {})", out_raw.len(), 3 * sz * sz);
 
         // 6. Denormalize RGB NCHW [0,1] → BGR HWC u8.
-        let swapped_bgr = rgb_nchw_01_to_bgr_hwc(out_raw, 128, 128);
+        let swapped_bgr = rgb_nchw_01_to_bgr_hwc(out_raw, sz, sz);
 
-        // 7. Inverse-warp patch back into frame using the forward affine matrix.
-        let fwd_mat = affine_matrix_swap(&target_face.landmarks);
+        // 7. Inverse-warp patch back into frame.
+        let fwd_mat = affine_matrix_swap(&target_face.landmarks, sz);
         paste_back(frame, &swapped_bgr, &fwd_mat)
             .context("swap: paste_back failed")?;
 
