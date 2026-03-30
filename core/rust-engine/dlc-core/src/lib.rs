@@ -6,6 +6,7 @@ pub mod detect;
 pub mod swap;
 pub mod enhance;
 pub mod preprocess;
+pub mod tracker;
 
 use anyhow::Result;
 use ndarray::Array3;

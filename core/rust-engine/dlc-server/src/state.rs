@@ -53,6 +53,9 @@ pub struct AppState {
     /// User-selected execution provider. Applied on next model reload.
     /// Values: "Auto", "DirectML", "NPU", "CPU"
     pub selected_provider: String,
+    /// Face detection interval: detect every Nth frame, reuse cached bbox between.
+    /// 1 = every frame (no tracking), 10 = default (skip 9/10 detections).
+    pub detection_interval: u32,
 }
 
 impl Default for AppState {
@@ -83,6 +86,7 @@ impl Default for AppState {
             recording: false,
             recording_path: None,
             selected_provider: "Auto".to_string(),
+            detection_interval: 10,
         }
     }
 }

@@ -519,6 +519,17 @@ export function ControlsPanel({
         </button>
       </div>
 
+      <div className="calibration">
+        <label className="section-label">Performance</label>
+        <div className="cal-row">
+          <span className="cal-label">Detect Every</span>
+          <input type="range" min={1} max={30} step={1}
+            value={calibration.detection_interval ?? 10}
+            onChange={e => onCalibrationChange({ detection_interval: Number(e.target.value) })} />
+          <span className="cal-value">{calibration.detection_interval ?? 10} frames</span>
+        </div>
+      </div>
+
       <div className="actions">
         {status === "disconnected" ? (
           <button className="btn primary" onClick={onConnect}>

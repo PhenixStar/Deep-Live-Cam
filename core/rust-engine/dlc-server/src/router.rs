@@ -1006,6 +1006,7 @@ async fn get_settings(
         "swap_offset_x": s.swap_offset_x,
         "swap_offset_y": s.swap_offset_y,
         "swap_scale":    s.swap_scale,
+        "detection_interval": s.detection_interval,
     }))
 }
 
@@ -1019,6 +1020,7 @@ struct SettingsUpdate {
     swap_offset_x:         Option<f32>,
     swap_offset_y:         Option<f32>,
     swap_scale:            Option<f32>,
+    detection_interval:    Option<u32>,
 }
 
 async fn update_settings(
@@ -1035,6 +1037,7 @@ async fn update_settings(
     if let Some(v) = body.swap_offset_x { s.swap_offset_x = v; }
     if let Some(v) = body.swap_offset_y { s.swap_offset_y = v; }
     if let Some(v) = body.swap_scale    { s.swap_scale = v.clamp(0.5, 2.0); }
+    if let Some(v) = body.detection_interval { s.detection_interval = v.clamp(1, 30); }
     Json(serde_json::json!({"status": "ok"}))
 }
 
@@ -1167,15 +1170,22 @@ async fn handle_video_ws(mut socket: WebSocket, state: ServerState) {
 
     let producer = std::thread::spawn(move || {
         tracing::info!("[WS] producer thread started");
+        // Face tracker: reuses cached detections to skip expensive SCRFD.
+        // Interval read from AppState.detection_interval (default 10).
+        let interval = st.app.read().unwrap().detection_interval;
+        let mut tracker = dlc_core::tracker::FaceTracker::new(interval);
         loop {
-            match produce_frame(&camera, &st) {
+            // Update interval from UI slider (cheap read lock).
+            let new_interval = st.app.read().unwrap().detection_interval;
+            tracker.set_interval(new_interval);
+
+            match produce_frame(&camera, &st, &mut tracker) {
                 Some(frame_data) => {
                     if frame_tx.blocking_send(frame_data).is_err() {
                         break; // receiver dropped — WS disconnected
                     }
                 }
                 None => {
-                    // Failed to produce frame — brief pause before retry
                     std::thread::sleep(std::time::Duration::from_millis(33));
                 }
             }
@@ -1226,6 +1236,7 @@ async fn handle_video_ws(mut socket: WebSocket, state: ServerState) {
 fn produce_frame(
     camera: &Arc<std::sync::Mutex<Option<dlc_capture::CameraCapture>>>,
     state: &ServerState,
+    tracker: &mut dlc_core::tracker::FaceTracker,
 ) -> Option<(Vec<u8>, FrameMetrics)> {
     let total_start = std::time::Instant::now();
 
@@ -1291,7 +1302,7 @@ fn produce_frame(
     };
 
     let (mut output_frame, metrics) = if let Some(src_bytes) = source_bytes {
-        match try_swap_frame_sync(&bgr_frame, &src_bytes, cached_source, &state.models, offset_x, offset_y, swap_scale) {
+        match try_swap_frame_sync(&bgr_frame, &src_bytes, cached_source, &state.models, offset_x, offset_y, swap_scale, tracker) {
             Some((swapped, face_rects, swap_bbox, detect_ms, swap_ms)) => {
                 let face_count = face_rects.len();
                 let metrics = FrameMetrics {
@@ -1399,12 +1410,13 @@ fn try_swap_frame_sync(
     offset_x: f32,
     offset_y: f32,
     scale: f32,
+    tracker: &mut dlc_core::tracker::FaceTracker,
 ) -> Option<(Frame, Vec<FaceRect>, FaceRect, f64, f64)> {
-    // Detect faces in source (if not cached) and target, timed.
     let detect_start = std::time::Instant::now();
 
-    let (source_face, target_face, target_faces) = if let Some(cached) = cached_source {
-        // Skip source decode + detection — use cached face with pre-computed embedding.
+    // --- Target face: use tracker to skip detection on most frames ---
+    let target_faces = if tracker.should_detect() {
+        // Full detection (runs every Nth frame).
         let mut det_guard = models.detector.lock().ok()?;
         let detector = det_guard.as_mut()?;
         let mut tfs = detector.detect(target_frame, 0.3).ok()?;
@@ -1413,31 +1425,35 @@ fn try_swap_frame_sync(
             let area_b = (b.bbox[2] - b.bbox[0]) * (b.bbox[3] - b.bbox[1]);
             area_b.partial_cmp(&area_a).unwrap_or(std::cmp::Ordering::Equal)
         });
-        let tf = tfs.first()?.clone();
-        (cached, tf, tfs)
+        tracker.update_detected(tfs.clone());
+        tfs
     } else {
-        // No cache: decode source image and detect faces in both source and target.
+        // Skip detection — reuse cached target faces from last detection.
+        tracker.get_cached().to_vec()
+    };
+
+    if target_faces.is_empty() {
+        tracker.invalidate(); // lost faces → force re-detect next frame
+        return None;
+    }
+    let target_face = target_faces[0].clone();
+
+    // --- Source face: use cached embedding or decode+detect ---
+    let source_face = if let Some(cached) = cached_source {
+        cached
+    } else {
         let source_frame = decode_to_bgr_frame(source_bytes).ok()?;
         let mut det_guard = models.detector.lock().ok()?;
         let detector = det_guard.as_mut()?;
-
         let mut sfs = detector.detect(&source_frame, 0.3).ok()?;
         sfs.sort_by(|a, b| {
             let area_a = (a.bbox[2] - a.bbox[0]) * (a.bbox[3] - a.bbox[1]);
             let area_b = (b.bbox[2] - b.bbox[0]) * (b.bbox[3] - b.bbox[1]);
             area_b.partial_cmp(&area_a).unwrap_or(std::cmp::Ordering::Equal)
         });
-        let sf = sfs.into_iter().next()?;
+        sfs.into_iter().next()?
+    };
 
-        let mut tfs = detector.detect(target_frame, 0.3).ok()?;
-        tfs.sort_by(|a, b| {
-            let area_a = (a.bbox[2] - a.bbox[0]) * (a.bbox[3] - a.bbox[1]);
-            let area_b = (b.bbox[2] - b.bbox[0]) * (b.bbox[3] - b.bbox[1]);
-            area_b.partial_cmp(&area_a).unwrap_or(std::cmp::Ordering::Equal)
-        });
-        let tf = tfs.first()?.clone();
-        (sf, tf, tfs)
-    }; // detector guard dropped
     let detect_ms = detect_start.elapsed().as_secs_f64() * 1000.0;
 
     // Build FaceRect list from detected target faces.

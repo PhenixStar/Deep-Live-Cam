@@ -32,6 +32,7 @@ export interface SwapCalibration {
   swap_offset_x: number;
   swap_offset_y: number;
   swap_scale: number;
+  detection_interval?: number;
 }
 
 export interface SystemMetrics {
