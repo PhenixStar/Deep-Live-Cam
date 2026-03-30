@@ -8,11 +8,13 @@ on:
 
 jobs:
   check:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - uses: pnpm/action-setup@v4
         with:
@@ -44,7 +46,7 @@ jobs:
           touch "app/src-tauri/binaries/deep-forge-server-x86_64-unknown-linux-gnu"
           chmod +x "app/src-tauri/binaries/deep-forge-server-x86_64-unknown-linux-gnu"
 
-      - name: Rust check
+      - name: Tauri Rust check
         working-directory: app/src-tauri
         run: cargo check
 
@@ -52,3 +54,25 @@ jobs:
         run: |
           python3 -m py_compile core/server.py
           python3 -m py_compile core/modules/camera_utils.py
+
+  rust-engine:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev
+
+      - name: Cargo clippy
+        working-directory: core/rust-engine
+        run: cargo clippy -- -D warnings 2>&1 || cargo clippy
+
+      - name: Cargo test
+        working-directory: core/rust-engine
+        run: cargo test

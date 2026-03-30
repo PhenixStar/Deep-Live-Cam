@@ -97,6 +97,15 @@ pub const MODELS: &[ModelInfo] = &[
         required: false,
         description: "INT8 QDQ quantized ArcFace — auto-selected when using NPU provider",
     },
+    ModelInfo {
+        name: "Inswapper 128 INT8 (NPU)",
+        path: "inswapper_128_int8.onnx",
+        url_suffix: "inswapper_128_int8.onnx",
+        fallback_url: "",
+        size_mb: 139,
+        required: false,
+        description: "INT8 QDQ quantized inswapper — auto-selected when using NPU provider",
+    },
     // === Optional: face enhancement ===
     ModelInfo {
         name: "GFPGAN 1024",

@@ -156,27 +156,37 @@ pub fn build_router(server_state: ServerState, remote: bool) -> Router {
         .layer(axum::extract::DefaultBodyLimit::max(100 * 1024 * 1024))
         .layer(cors);
 
-    // In remote mode, validate Bearer token on all requests except /health.
+    // In remote mode, validate token on all requests except /health.
+    // Accepts both: Authorization: Bearer <token> OR X-Deep-Forge-Token: <token>
     if remote {
         if let Some(ref token) = server_state.api_token {
-            let expected = format!("Bearer {token}");
+            let expected_bearer = format!("Bearer {token}");
+            let expected_raw = token.clone();
             router = router.layer(axum::middleware::from_fn(
                 move |req: axum::http::Request<axum::body::Body>, next: axum::middleware::Next| {
-                    let expected = expected.clone();
+                    let expected_bearer = expected_bearer.clone();
+                    let expected_raw = expected_raw.clone();
                     async move {
-                        // /health is always public (for liveness probes).
                         if req.uri().path() == "/health" {
                             return next.run(req).await;
                         }
-                        let auth = req.headers()
+                        // Check Authorization: Bearer <token>
+                        let bearer_ok = req.headers()
                             .get(axum::http::header::AUTHORIZATION)
                             .and_then(|v| v.to_str().ok())
-                            .unwrap_or("");
-                        if auth == expected {
+                            .map(|v| v == expected_bearer)
+                            .unwrap_or(false);
+                        // Check X-Deep-Forge-Token: <token>
+                        let custom_ok = req.headers()
+                            .get("X-Deep-Forge-Token")
+                            .and_then(|v| v.to_str().ok())
+                            .map(|v| v == expected_raw)
+                            .unwrap_or(false);
+                        if bearer_ok || custom_ok {
                             next.run(req).await
                         } else {
                             (StatusCode::UNAUTHORIZED,
-                             Json(serde_json::json!({"error": "invalid or missing Bearer token"})))
+                             Json(serde_json::json!({"error": "invalid or missing token (use Authorization: Bearer or X-Deep-Forge-Token header)"})))
                                 .into_response()
                         }
                     }
