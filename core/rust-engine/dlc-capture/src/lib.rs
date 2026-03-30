@@ -92,14 +92,25 @@ mod opencv_backend {
 
     impl CameraCaptureInner {
         pub fn open(index: u32) -> Result<Self> {
-            // On Windows, MSMF (the default CAP_ANY backend) can take 30+ seconds
-            // to initialise a camera.  DirectShow initialises in under a second.
+            // Try DirectShow first (fast ~1s), fall back to MSMF/CAP_ANY (slow ~30s).
+            // Some cameras fail with DirectShow on OpenCV 4.12 (pVih assertion).
             #[cfg(target_os = "windows")]
-            let backend = CAP_DSHOW;
+            let cap = {
+                let dshow = VideoCapture::new(index as i32, CAP_DSHOW);
+                match dshow {
+                    Ok(ref c) if c.is_opened().unwrap_or(false) => {
+                        tracing::info!("Camera {index} opened via DirectShow");
+                        dshow.unwrap()
+                    }
+                    _ => {
+                        tracing::warn!("DirectShow failed for camera {index}, trying MSMF...");
+                        VideoCapture::new(index as i32, CAP_ANY)?
+                    }
+                }
+            };
             #[cfg(not(target_os = "windows"))]
-            let backend = CAP_ANY;
+            let cap = VideoCapture::new(index as i32, CAP_ANY)?;
 
-            let mut cap = VideoCapture::new(index as i32, backend)?;
             anyhow::ensure!(
                 cap.is_opened()?,
                 "camera index {} could not be opened",
@@ -150,11 +161,9 @@ mod opencv_backend {
 
     pub fn list_cameras_opencv() -> Result<Vec<CameraInfo>> {
         let mut cameras = Vec::new();
-        // Probe only 0-3 to limit enumeration time.  On Windows we use
-        // CAP_DSHOW so each probe completes quickly; CAP_ANY (MSMF) can
-        // block for 30+ seconds per index.
+        // Try DirectShow first (fast), fall back to MSMF if it fails.
         #[cfg(target_os = "windows")]
-        let backend = CAP_DSHOW;
+        let backend = CAP_ANY; // Use CAP_ANY for probing — more compatible
         #[cfg(not(target_os = "windows"))]
         let backend = CAP_ANY;
 
