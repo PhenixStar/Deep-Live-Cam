@@ -17,9 +17,11 @@ export function useProfiles(): UseProfilesResult {
   const refresh = useCallback(() => {
     fetch(`${API_BASE}/profiles`)
       .then((r) => r.json())
-      .then((data: { profiles: Profile[]; active_id?: string | null }) => {
-        setProfiles(data.profiles ?? []);
-        if (data.active_id !== undefined) {
+      .then((data: Profile[] | { profiles: Profile[]; active_id?: string | null }) => {
+        // API returns array directly, or wrapped object
+        const list = Array.isArray(data) ? data : (data.profiles ?? []);
+        setProfiles(list);
+        if (!Array.isArray(data) && data.active_id !== undefined) {
           setActiveId(data.active_id ?? null);
         }
       })
