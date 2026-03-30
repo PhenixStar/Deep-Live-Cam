@@ -46,3 +46,10 @@
 ## CI/CD
 
 - [ ] .github/workflows/ci.yml changes need PAT with `workflow` scope to push
+
+## NPU Results (2026-03-30)
+- VitisAI EP: working on AMD XDNA2 (Ryzen AI 9 HX 370)
+- FP32 models: 1720ms/swap (graph partitioned, CPU fallback for float ops)
+- DirectML: 490ms/swap (recommended for FP32/FP16)
+- NPU needs INT8 quantized models for real speedup
+
