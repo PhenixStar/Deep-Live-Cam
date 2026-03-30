@@ -5,23 +5,14 @@ import type { ModelInfo } from "../types";
 
 const API_BASE = "http://localhost:8008";
 
-const MODEL_URLS: Record<string, string> = {
-  "buffalo_l/buffalo_l/det_10g.onnx":
-    "https://huggingface.co/hacksider/deep-live-cam/resolve/main/buffalo_l/buffalo_l/det_10g.onnx",
-  "buffalo_l/buffalo_l/w600k_r50.onnx":
-    "https://huggingface.co/hacksider/deep-live-cam/resolve/main/buffalo_l/buffalo_l/w600k_r50.onnx",
-  "inswapper_128.onnx":
-    "https://huggingface.co/hacksider/deep-live-cam/resolve/main/inswapper_128_fp16.onnx",
-  "gfpgan-1024.onnx":
-    "https://huggingface.co/hacksider/deep-live-cam/resolve/main/gfpgan-1024.onnx",
-  "GPEN-BFR-256.onnx":
-    "https://huggingface.co/hacksider/deep-live-cam/resolve/main/GPEN-BFR-256.onnx",
-  "GPEN-BFR-512.onnx":
-    "https://huggingface.co/hacksider/deep-live-cam/resolve/main/GPEN-BFR-512.onnx",
-};
+/// Check if a model has a download URL (from the backend manifest).
+export function hasDownloadUrl(model: ModelInfo): boolean {
+  return Boolean(model.url_suffix || model.fallback_url);
+}
 
-export function hasDownloadUrl(file: string): boolean {
-  return file in MODEL_URLS;
+/// Get the best download URL for a model.
+function getDownloadUrl(model: ModelInfo): string | null {
+  return model.url_suffix || model.fallback_url || null;
 }
 
 interface DownloadProgressEvent {
@@ -76,15 +67,18 @@ export function useModels(): {
 
   const downloadModel = useCallback(
     async (model: ModelInfo) => {
-      const url = MODEL_URLS[model.file];
+      const url = getDownloadUrl(model);
       if (!url) return;
+
+      const modelPath = model.path || model.file;
+      if (!modelPath) return;
 
       setDownloading((prev) => ({ ...prev, [model.name]: 0 }));
 
       try {
         // Resolve absolute path via Tauri command
         const modelsDir = await invoke<string>("get_models_dir");
-        const dest = modelsDir + "/" + model.file.replace(/\//g, "/");
+        const dest = modelsDir + "/" + modelPath;
 
         await invoke<void>("download_model", {
           name: model.name,

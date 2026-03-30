@@ -3,6 +3,7 @@ import { ControlsPanel } from "./components/controls-panel";
 import { VideoCanvas } from "./components/video-canvas";
 import { MetricsPanel } from "./components/metrics-panel";
 import { ModelManager } from "./components/model-manager";
+import { ProfileCatalog } from "./components/profile-catalog";
 import { useMetricsWs } from "./hooks/use-metrics-ws";
 import { useSystemMetrics } from "./hooks/use-system-metrics";
 import { useModels } from "./hooks/use-models";
@@ -295,6 +296,21 @@ export default function App() {
       {showModelManager && (
         <ModelManager onClose={() => setShowModelManager(false)} />
       )}
+
+      <ProfileCatalog
+        isOpen={showCatalog}
+        onClose={() => setShowCatalog(false)}
+        onSelect={(id) => { handleProfileSelect(id); setShowCatalog(false); }}
+        onCreateNew={() => {
+          fetch(`${API_BASE}/profiles`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: "New Profile", description: "" }),
+          })
+            .then(() => refreshProfiles())
+            .catch(() => {});
+        }}
+      />
     </div>
   );
 }

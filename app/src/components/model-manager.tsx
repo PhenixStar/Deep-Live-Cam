@@ -49,7 +49,7 @@ export function ModelManager({ onClose }: ModelManagerProps) {
         <div className="mm-list">
           {models.map((model) => {
             const pct = downloading[model.name];
-            const hasUrl = hasDownloadUrl(model.file);
+            const hasUrl = hasDownloadUrl(model);
 
             return (
               <div key={model.file} className="mm-card">

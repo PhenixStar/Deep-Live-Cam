@@ -42,10 +42,16 @@ export interface SystemMetrics {
 
 export interface ModelInfo {
   name: string;
-  file: string;
+  path: string;
+  file?: string; // legacy alias
+  url_suffix: string; // full download URL
+  fallback_url: string;
   file_exists: boolean;
-  size_mb: number | null;
+  file_size_mb: number;
+  size_mb: number;
   required: boolean;
+  loaded?: boolean;
+  description?: string;
 }
 
 export interface Resolution {
