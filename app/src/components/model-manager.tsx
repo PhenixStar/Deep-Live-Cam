@@ -52,7 +52,7 @@ export function ModelManager({ onClose }: ModelManagerProps) {
             const hasUrl = hasDownloadUrl(model);
 
             return (
-              <div key={model.file} className="mm-card">
+              <div key={model.name} className="mm-card">
                 <div className="mm-card-top">
                   <div className="mm-card-name">
                     {model.name}
@@ -92,7 +92,7 @@ export function ModelManager({ onClose }: ModelManagerProps) {
 
                 {!model.file_exists && !hasUrl && (
                   <div className="mm-manual-note">
-                    Place <code>{model.file}</code> in models dir manually.
+                    Place <code>{model.path}</code> in models dir manually.
                   </div>
                 )}
               </div>

@@ -691,7 +691,7 @@ async fn recording_stop(State(server_state): State<ServerState>) -> impl IntoRes
 // Image helpers used by swap_image
 // ---------------------------------------------------------------------------
 
-fn decode_to_bgr_frame(bytes: &[u8]) -> anyhow::Result<Frame> {
+pub fn decode_to_bgr_frame(bytes: &[u8]) -> anyhow::Result<Frame> {
     let img = image::load_from_memory(bytes)?.to_rgb8();
     let (w, h) = img.dimensions();
     let mut frame = ndarray::Array3::<u8>::zeros((h as usize, w as usize, 3));
@@ -1281,7 +1281,7 @@ fn produce_frame(
     };
 
     let (mut output_frame, metrics) = if let Some(src_bytes) = source_bytes {
-        match try_swap_frame_sync(&bgr_frame, &src_bytes, &state.models, offset_x, offset_y, swap_scale) {
+        match try_swap_frame_sync(&bgr_frame, &src_bytes, cached_source, &state.models, offset_x, offset_y, swap_scale) {
             Some((swapped, face_rects, swap_bbox, detect_ms, swap_ms)) => {
                 let face_count = face_rects.len();
                 let metrics = FrameMetrics {
@@ -1376,20 +1376,38 @@ fn produce_frame(
 
 /// Synchronous face swap with timing (runs on blocking thread).
 /// Returns (swapped_frame, face_rects, swap_bbox, detect_ms, swap_ms).
+///
+/// When `cached_source` is `Some`, source image decoding, detection, and
+/// embedding extraction are all skipped — the cached face (with pre-computed
+/// embedding) is used directly. This eliminates ~35 ms of redundant work per
+/// frame for profile-activated sources.
 fn try_swap_frame_sync(
     target_frame: &Frame,
     source_bytes: &[u8],
+    cached_source: Option<dlc_core::DetectedFace>,
     models: &Arc<Models>,
     offset_x: f32,
     offset_y: f32,
     scale: f32,
 ) -> Option<(Frame, Vec<FaceRect>, FaceRect, f64, f64)> {
-    let source_frame = decode_to_bgr_frame(source_bytes).ok()?;
-
-    // Detect faces in source and target, timed.
-    // Select the largest face in each image (closest to camera).
+    // Detect faces in source (if not cached) and target, timed.
     let detect_start = std::time::Instant::now();
-    let (source_face, target_face, target_faces) = {
+
+    let (source_face, target_face, target_faces) = if let Some(cached) = cached_source {
+        // Skip source decode + detection — use cached face with pre-computed embedding.
+        let mut det_guard = models.detector.lock().ok()?;
+        let detector = det_guard.as_mut()?;
+        let mut tfs = detector.detect(target_frame, 0.3).ok()?;
+        tfs.sort_by(|a, b| {
+            let area_a = (a.bbox[2] - a.bbox[0]) * (a.bbox[3] - a.bbox[1]);
+            let area_b = (b.bbox[2] - b.bbox[0]) * (b.bbox[3] - b.bbox[1]);
+            area_b.partial_cmp(&area_a).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let tf = tfs.first()?.clone();
+        (cached, tf, tfs)
+    } else {
+        // No cache: decode source image and detect faces in both source and target.
+        let source_frame = decode_to_bgr_frame(source_bytes).ok()?;
         let mut det_guard = models.detector.lock().ok()?;
         let detector = det_guard.as_mut()?;
 
@@ -1447,12 +1465,22 @@ fn try_swap_frame_sync(
     }
 
     // Swap face, timed.
+    // If the cached source already carries an embedding, use it directly;
+    // otherwise compute it now (requires decoding source bytes again).
     let swap_start = std::time::Instant::now();
     let mut swap_guard = models.swapper.lock().ok()?;
     let swapper = swap_guard.as_mut()?;
-    let embedding = swapper.get_embedding(&source_frame, &source_face).ok()?;
-    let mut sf = source_face;
-    sf.embedding = Some(embedding);
+    let sf = if source_face.embedding.is_some() {
+        source_face
+    } else {
+        let source_frame = decode_to_bgr_frame(source_bytes).ok()?;
+        let embedding = swapper.get_embedding(&source_frame, &source_face).ok()?;
+        let mut face = source_face;
+        face.embedding = Some(embedding);
+        face
+    };
+    // Ensure embedding field is set (satisfies swap contract).
+    let _ = sf.embedding.as_ref()?;
     let mut output = target_frame.clone();
     swapper.swap(&sf, &calibrated_target, &mut output).ok()?;
     let swap_ms = swap_start.elapsed().as_secs_f64() * 1000.0;

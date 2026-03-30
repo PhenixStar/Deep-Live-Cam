@@ -17,13 +17,8 @@ export function useProfiles(): UseProfilesResult {
   const refresh = useCallback(() => {
     fetch(`${API_BASE}/profiles`)
       .then((r) => r.json())
-      .then((data: Profile[] | { profiles: Profile[]; active_id?: string | null }) => {
-        // API returns array directly, or wrapped object
-        const list = Array.isArray(data) ? data : (data.profiles ?? []);
-        setProfiles(list);
-        if (!Array.isArray(data) && data.active_id !== undefined) {
-          setActiveId(data.active_id ?? null);
-        }
+      .then((data: Profile[]) => {
+        setProfiles(Array.isArray(data) ? data : []);
       })
       .catch(() => {});
   }, []);

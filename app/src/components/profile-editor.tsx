@@ -60,9 +60,12 @@ export function ProfileEditor({ profileId, onSave, onCancel }: ProfileEditorProp
           data.thumbnail_b64 ? `data:image/jpeg;base64,${data.thumbnail_b64}` : null,
         );
         // Pad photos array to MAX_SLOTS with nulls
+        // Backend may return photos as plain URL strings or as PhotoSlot objects
         const slots: (PhotoSlot | null)[] = Array(MAX_SLOTS).fill(null);
-        (data.photos ?? []).forEach((p: PhotoSlot, i: number) => {
-          if (i < MAX_SLOTS) slots[i] = p;
+        (data.photos ?? []).forEach((p: PhotoSlot | string, i: number) => {
+          if (i < MAX_SLOTS) {
+            slots[i] = typeof p === "string" ? { url: p, score: 0, has_face: true } : p;
+          }
         });
         setPhotos(slots);
       })
@@ -116,19 +119,19 @@ export function ProfileEditor({ profileId, onSave, onCancel }: ProfileEditorProp
           body: fd,
         });
         if (!res.ok) throw new Error(await res.text());
-        const data = (await res.json()) as {
-          photos: PhotoSlot[];
-          thumbnail_b64: string | null;
-        };
 
-        // Server returns updated photo list; map back into slots
-        const slots: (PhotoSlot | null)[] = Array(MAX_SLOTS).fill(null);
-        (data.photos ?? []).forEach((p: PhotoSlot, i: number) => {
-          if (i < MAX_SLOTS) slots[i] = p;
-        });
-        setPhotos(slots);
-        if (data.thumbnail_b64) {
-          setThumbnail(`data:image/jpeg;base64,${data.thumbnail_b64}`);
+        // Re-fetch profile detail to get the authoritative updated photo list
+        const detailRes = await fetch(`${API_BASE}/profiles/${id}`);
+        if (detailRes.ok) {
+          const data = await detailRes.json();
+          const slots: (PhotoSlot | null)[] = Array(MAX_SLOTS).fill(null);
+          (data.photos ?? []).forEach((p: PhotoSlot | string, i: number) => {
+            if (i < MAX_SLOTS) {
+              slots[i] = typeof p === "string" ? { url: p, score: 0, has_face: true } : p;
+            }
+          });
+          setPhotos(slots);
+          if (data.thumbnail_b64) setThumbnail(`data:image/jpeg;base64,${data.thumbnail_b64}`);
         }
       } catch (e) {
         setError(`Upload failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -153,18 +156,20 @@ export function ProfileEditor({ profileId, onSave, onCancel }: ProfileEditorProp
           { method: "DELETE" },
         );
         if (!res.ok) throw new Error(await res.text());
-        const data = (await res.json()) as {
-          photos: PhotoSlot[];
-          thumbnail_b64: string | null;
-        };
-        const slots: (PhotoSlot | null)[] = Array(MAX_SLOTS).fill(null);
-        (data.photos ?? []).forEach((p: PhotoSlot, i: number) => {
-          if (i < MAX_SLOTS) slots[i] = p;
-        });
-        setPhotos(slots);
-        setThumbnail(
-          data.thumbnail_b64 ? `data:image/jpeg;base64,${data.thumbnail_b64}` : null,
-        );
+
+        // Re-fetch profile detail to get the authoritative updated photo list
+        const detailRes = await fetch(`${API_BASE}/profiles/${resolvedId}`);
+        if (detailRes.ok) {
+          const data = await detailRes.json();
+          const slots: (PhotoSlot | null)[] = Array(MAX_SLOTS).fill(null);
+          (data.photos ?? []).forEach((p: PhotoSlot | string, i: number) => {
+            if (i < MAX_SLOTS) {
+              slots[i] = typeof p === "string" ? { url: p, score: 0, has_face: true } : p;
+            }
+          });
+          setPhotos(slots);
+          setThumbnail(data.thumbnail_b64 ? `data:image/jpeg;base64,${data.thumbnail_b64}` : null);
+        }
       } catch (e) {
         setError(`Remove failed: ${e instanceof Error ? e.message : String(e)}`);
       }

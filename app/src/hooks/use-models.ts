@@ -70,7 +70,7 @@ export function useModels(): {
       const url = getDownloadUrl(model);
       if (!url) return;
 
-      const modelPath = model.path || model.file;
+      const modelPath = model.path;
       if (!modelPath) return;
 
       setDownloading((prev) => ({ ...prev, [model.name]: 0 }));

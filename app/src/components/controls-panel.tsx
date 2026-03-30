@@ -41,6 +41,14 @@ interface ControlsPanelProps {
   onProfileAddNew: () => void;
 }
 
+// Maps UI display names to the API provider identifiers expected by the backend.
+const PROVIDER_API_NAMES: Record<string, string> = {
+  "VitisAI NPU": "NPU",
+  "DirectML": "DirectML",
+  "CPU": "CPU",
+  "Auto": "Auto",
+};
+
 const ENHANCER_LABELS: { key: keyof Enhancers; label: string }[] = [
   { key: "face_enhancer",      label: "GFPGAN"   },
   { key: "face_enhancer_gpen256", label: "GPEN-256" },
@@ -286,8 +294,8 @@ export function ControlsPanel({
     setSelectedProvider(providerName);
     setProviderReloading(true);
     try {
-      // Map display name to API value
-      const apiName = providerName === "VitisAI NPU" ? "NPU" : providerName;
+      // Map display name to the API value the backend expects
+      const apiName = PROVIDER_API_NAMES[providerName] ?? providerName;
       await fetch(`${API_BASE}/providers/switch`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

@@ -43,8 +43,9 @@ export interface SystemMetrics {
 export interface ModelInfo {
   name: string;
   path: string;
-  file?: string; // legacy alias
-  url_suffix: string; // full download URL
+  // url_suffix matches the JSON key sent by the backend; the backend's custom
+  // serializer emits a full download URL despite the "suffix" name.
+  url_suffix: string;
   fallback_url: string;
   file_exists: boolean;
   file_size_mb: number;

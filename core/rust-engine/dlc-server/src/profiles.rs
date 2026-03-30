@@ -21,7 +21,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::router::ServerState;
+use crate::router::{decode_to_bgr_frame, ServerState};
 use dlc_core::Frame;
 
 // ---------------------------------------------------------------------------
@@ -54,8 +54,21 @@ pub struct ProfileSummary {
     pub name: String,
     pub photo_count: usize,
     pub score: f32,
+    /// Unix timestamp (seconds) when the profile was created.
+    pub created: u64,
     /// Base64-encoded JPEG thumbnail (empty string if none).
     pub thumbnail_b64: String,
+}
+
+/// Per-photo metadata returned to the frontend.
+#[derive(Serialize, Clone)]
+pub struct PhotoSlot {
+    /// Filename (e.g. "photo_0.jpg") used as a stable identifier.
+    pub url: String,
+    /// Detection confidence for this photo (0.0 if not yet computed).
+    pub score: f32,
+    /// Whether a face was detected in this photo.
+    pub has_face: bool,
 }
 
 /// JSON returned to clients (detail endpoint).
@@ -64,7 +77,7 @@ pub struct ProfileDetail {
     pub id: Uuid,
     pub name: String,
     pub description: String,
-    pub photos: Vec<String>,
+    pub photos: Vec<PhotoSlot>,
     pub has_embedding: bool,
     pub score: f32,
     pub created: u64,
@@ -125,24 +138,44 @@ fn read_thumbnail_b64(dir: &Path) -> String {
     }
 }
 
+/// Build the list of photo metadata objects expected by the frontend.
+/// Uses the profile's average score as a proxy (per-photo scores are not
+/// persisted separately). `has_face` is true whenever the photo file exists
+/// and the profile-level score > 0 (meaning at least one face was found
+/// during the last recompute pass).
+fn build_photo_slots(dir: &Path, meta: &ProfileMeta) -> Vec<PhotoSlot> {
+    meta.photos
+        .iter()
+        .map(|name| {
+            let exists = dir.join(name).exists();
+            PhotoSlot {
+                url: name.clone(),
+                score: if exists && meta.score > 0.0 { meta.score } else { 0.0 },
+                has_face: exists && meta.score > 0.0,
+            }
+        })
+        .collect()
+}
+
+/// Assemble a full `ProfileDetail` response from meta + directory.
+fn build_profile_detail(dir: &Path, meta: &ProfileMeta) -> ProfileDetail {
+    ProfileDetail {
+        id: meta.id,
+        name: meta.name.clone(),
+        description: meta.description.clone(),
+        photos: build_photo_slots(dir, meta),
+        has_embedding: dir.join("embedding.bin").exists(),
+        score: meta.score,
+        created: meta.created,
+        thumbnail_b64: read_thumbnail_b64(dir),
+    }
+}
+
 fn now_unix() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
-}
-
-/// Decode raw image bytes into a BGR HWC Frame.
-fn decode_to_bgr_frame(bytes: &[u8]) -> Result<Frame> {
-    let img = image::load_from_memory(bytes)?.to_rgb8();
-    let (w, h) = img.dimensions();
-    let mut frame = ndarray::Array3::<u8>::zeros((h as usize, w as usize, 3));
-    for (x, y, px) in img.enumerate_pixels() {
-        frame[[y as usize, x as usize, 0]] = px[2]; // B
-        frame[[y as usize, x as usize, 1]] = px[1]; // G
-        frame[[y as usize, x as usize, 2]] = px[0]; // R
-    }
-    Ok(frame)
 }
 
 /// Crop and resize a face region to 128x128 JPEG bytes for the thumbnail.
@@ -354,13 +387,14 @@ pub async fn list_profiles(State(state): State<ServerState>) -> Response {
                 name: meta.name,
                 photo_count: meta.photos.len(),
                 score: meta.score,
+                created: meta.created,
                 thumbnail_b64: read_thumbnail_b64(&path),
             });
         }
     }
 
-    // Sort by creation time (newest first) via the directory name (UUID, stable).
-    profiles.sort_by(|a, b| a.name.cmp(&b.name));
+    // Sort by creation time, newest first.
+    profiles.sort_by(|a, b| b.created.cmp(&a.created));
 
     Json(profiles).into_response()
 }
@@ -424,19 +458,7 @@ pub async fn get_profile(
         Err(_) => return err_json(StatusCode::NOT_FOUND, "profile not found"),
     };
 
-    let has_embedding = dir.join("embedding.bin").exists();
-
-    Json(ProfileDetail {
-        id: meta.id,
-        name: meta.name,
-        description: meta.description,
-        photos: meta.photos,
-        has_embedding,
-        score: meta.score,
-        created: meta.created,
-        thumbnail_b64: read_thumbnail_b64(&dir),
-    })
-    .into_response()
+    Json(build_profile_detail(&dir, &meta)).into_response()
 }
 
 /// PUT /profiles/{id}
@@ -589,10 +611,8 @@ pub async fn add_photo(
     }
 
     Json(serde_json::json!({
-        "status": "ok",
-        "photo": filename,
-        "photo_count": meta.photos.len(),
-        "score": meta.score
+        "photos": build_photo_slots(&dir, &meta),
+        "thumbnail_b64": read_thumbnail_b64(&dir),
     }))
     .into_response()
 }
@@ -632,9 +652,8 @@ pub async fn delete_photo(
     }
 
     Json(serde_json::json!({
-        "status": "ok",
-        "photo_count": meta.photos.len(),
-        "score": meta.score
+        "photos": build_photo_slots(&dir, &meta),
+        "thumbnail_b64": read_thumbnail_b64(&dir),
     }))
     .into_response()
 }
