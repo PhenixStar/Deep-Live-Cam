@@ -189,8 +189,9 @@ export default function App() {
     };
   }, []);
 
-  // Auto-update check (non-blocking)
+  // Auto-update check (non-blocking, Tauri only)
   useEffect(() => {
+    if (!(window as any).__TAURI_INTERNALS__) return;
     const timer = setTimeout(async () => {
       try {
         const { check } = await import("@tauri-apps/plugin-updater");

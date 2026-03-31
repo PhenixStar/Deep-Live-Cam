@@ -1,9 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ModelInfo } from "../types";
 
 const API_BASE = "http://localhost:8008";
+
+// Detect if running inside Tauri webview (vs plain browser).
+const IS_TAURI = Boolean(
+  typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__
+);
 
 /// Check if a model has a download URL (from the backend manifest).
 export function hasDownloadUrl(model: ModelInfo): boolean {
@@ -36,7 +39,7 @@ export function useModels(): {
   const [downloading, setDownloading] = useState<Record<string, number>>({});
   const [reloading, setReloading] = useState(false);
   const [reloadResult, setReloadResult] = useState<ReloadResult | null>(null);
-  const unlistenRef = useRef<UnlistenFn | null>(null);
+  const unlistenRef = useRef<(() => void) | null>(null);
 
   const fetchModels = useCallback(() => {
     fetch(`${API_BASE}/models/status`)
@@ -50,14 +53,19 @@ export function useModels(): {
 
     let active = true;
 
-    listen<DownloadProgressEvent>("model_download_progress", (event) => {
-      if (!active) return;
-      const { name, downloaded, total } = event.payload;
-      const pct = total > 0 ? Math.round((downloaded / total) * 100) : 0;
-      setDownloading((prev) => ({ ...prev, [name]: pct }));
-    }).then((fn) => {
-      unlistenRef.current = fn;
-    });
+    if (IS_TAURI) {
+      import("@tauri-apps/api/event").then(({ listen }) => {
+        if (!active) return;
+        listen<DownloadProgressEvent>("model_download_progress", (event) => {
+          if (!active) return;
+          const { name, downloaded, total } = event.payload;
+          const pct = total > 0 ? Math.round((downloaded / total) * 100) : 0;
+          setDownloading((prev) => ({ ...prev, [name]: pct }));
+        }).then((fn) => {
+          unlistenRef.current = fn;
+        });
+      });
+    }
 
     return () => {
       active = false;
@@ -76,15 +84,18 @@ export function useModels(): {
       setDownloading((prev) => ({ ...prev, [model.name]: 0 }));
 
       try {
-        // Resolve absolute path via Tauri command
-        const modelsDir = await invoke<string>("get_models_dir");
-        const dest = modelsDir + "/" + modelPath;
-
-        await invoke<void>("download_model", {
-          name: model.name,
-          url,
-          dest,
-        });
+        if (IS_TAURI) {
+          // Tauri path: download via sidecar with progress events
+          const { invoke } = await import("@tauri-apps/api/core");
+          const modelsDir = await invoke<string>("get_models_dir");
+          const dest = modelsDir + "/" + modelPath;
+          await invoke<void>("download_model", { name: model.name, url, dest });
+        } else {
+          // Browser mode: no Tauri IPC, can't write to disk.
+          // Open the model URL in a new tab so user can download manually.
+          window.open(url, "_blank");
+          throw new Error("Download models via the desktop app or place files in the models directory manually.");
+        }
 
         setDownloading((prev) => {
           const next = { ...prev };

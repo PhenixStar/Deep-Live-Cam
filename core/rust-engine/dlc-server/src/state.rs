@@ -60,7 +60,8 @@ pub struct AppState {
 
 impl Default for AppState {
     fn default() -> Self {
-        let models_dir = std::env::var("DEEP_LIVE_CAM_MODELS_DIR")
+        let models_dir = std::env::var("DEEP_FORGE_MODELS_DIR")
+            .or_else(|_| std::env::var("DEEP_LIVE_CAM_MODELS_DIR")) // backwards compat
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|_| std::path::PathBuf::from("models"));
 

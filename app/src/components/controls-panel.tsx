@@ -1,6 +1,10 @@
 import { useState, useEffect, useRef, type ChangeEvent } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import type { Status, Camera, Enhancers, Resolution, SwapCalibration, Profile, InputMode, ProviderInfo, ProvidersResponse } from "../types";
+
+// Lazy-import Tauri API only when inside Tauri webview.
+const IS_TAURI = Boolean(
+  typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__
+);
 import { SourceSelector } from "./source-selector";
 
 const API_BASE = "http://localhost:8008";
@@ -248,7 +252,10 @@ export function ControlsPanel({
   const handleToggleRemote = async (enable: boolean) => {
     setRestarting(true);
     try {
-      await invoke("restart_sidecar", { remote: enable });
+      if (IS_TAURI) {
+        const { invoke } = await import("@tauri-apps/api/core");
+        await invoke("restart_sidecar", { remote: enable });
+      }
       // Refresh server mode info after restart
       setTimeout(() => {
         fetch(`${API_BASE}/health`)
